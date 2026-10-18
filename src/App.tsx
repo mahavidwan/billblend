@@ -5,7 +5,8 @@ import Dashboard from './pages/Dashboard';
 import CreateGroup from './pages/CreateGroup';
 import GroupMonitor from './pages/GroupMonitor';
 import AddExpense from './pages/AddExpense';
-import ImportGroup from './pages/ImportGroup'; // <-- Imported!
+import ImportGroup from './pages/ImportGroup';
+import GroupSettings from './pages/GroupSettings'; // NEW!
 
 export default function App() {
   return (
@@ -27,8 +28,10 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/create" element={<CreateGroup />} />
               <Route path="/group/:id" element={<GroupMonitor />} />
+              <Route path="/group/:id/settings" element={<GroupSettings />} /> {/* NEW Route */}
               <Route path="/group/:id/add" element={<AddExpense />} />
-              <Route path="/import" element={<ImportGroup />} /> {/* Magic Link Route */}
+              <Route path="/group/:id/expense/:expenseId/edit" element={<AddExpense />} /> {/* NEW Edit Route */}
+              <Route path="/import" element={<ImportGroup />} /> 
             </Routes>
           </main>
         </div>

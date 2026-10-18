@@ -27,7 +27,7 @@ export interface Group {
   id: string;
   name: string;
   createdAt: string;
-  isPinned?: boolean; // NEW: Pin state
+  isPinned?: boolean;
   members: Member[];
   expenses: Expense[];
 }
@@ -38,13 +38,18 @@ interface AppState {
   
   createGroup: (name: string, members: string[]) => string;
   setActiveGroup: (id: string | null) => void;
-  addExpense: (groupId: string, expense: Omit<Expense, 'id' | 'date'>) => void;
   importGroup: (group: Group) => void; 
-  
-  // NEW BATCH 8 ACTIONS
   deleteGroup: (id: string) => void;
   togglePinGroup: (id: string) => void;
+  
+  // Expenses
+  addExpense: (groupId: string, expense: Omit<Expense, 'id' | 'date'>) => void;
   deleteExpense: (groupId: string, expenseId: string) => void;
+  editExpense: (groupId: string, expenseId: string, updatedData: Omit<Expense, 'id' | 'date'>) => void;
+
+  // Members
+  addMember: (groupId: string, name: string) => void;
+  removeMember: (groupId: string, memberId: string) => void;
 }
 
 export const useStore = create<AppState>()(
@@ -65,47 +70,40 @@ export const useStore = create<AppState>()(
         set((state) => ({ groups: [newGroup, ...state.groups] }));
         return newGroup.id;
       },
-
       setActiveGroup: (id) => set({ activeGroupId: id }),
+      
+      importGroup: (importedGroup) => set((state) => {
+        const exists = state.groups.some(g => g.id === importedGroup.id);
+        if (exists) return { groups: state.groups.map(g => g.id === importedGroup.id ? importedGroup : g) };
+        return { groups: [importedGroup, ...state.groups] };
+      }),
+      deleteGroup: (id) => set((state) => ({ groups: state.groups.filter((g) => g.id !== id) })),
+      togglePinGroup: (id) => set((state) => ({ groups: state.groups.map((g) => g.id === id ? { ...g, isPinned: !g.isPinned } : g) })),
 
-      addExpense: (groupId, newExpenseData) => {
-        set((state) => ({
-          groups: state.groups.map((group) => {
-            if (group.id !== groupId) return group;
-            const newExpense: Expense = {
-              ...newExpenseData,
-              id: crypto.randomUUID(),
-              date: new Date().toISOString(),
-            };
-            return { ...group, expenses: [newExpense, ...group.expenses] };
-          }),
-        }));
-      },
-
-      importGroup: (importedGroup) => {
-        set((state) => {
-          const exists = state.groups.some(g => g.id === importedGroup.id);
-          if (exists) {
-            return { groups: state.groups.map(g => g.id === importedGroup.id ? importedGroup : g) };
-          }
-          return { groups: [importedGroup, ...state.groups] };
-        });
-      },
-
-      // --- BATCH 8 ACTIONS ---
-      deleteGroup: (id) => set((state) => ({
-        groups: state.groups.filter((g) => g.id !== id)
+      // --- EXPENSE ACTIONS ---
+      addExpense: (groupId, newExpenseData) => set((state) => ({
+        groups: state.groups.map((group) => {
+          if (group.id !== groupId) return group;
+          const newExpense: Expense = { ...newExpenseData, id: crypto.randomUUID(), date: new Date().toISOString() };
+          return { ...group, expenses: [newExpense, ...group.expenses] };
+        }),
       })),
-
-      togglePinGroup: (id) => set((state) => ({
-        groups: state.groups.map((g) => g.id === id ? { ...g, isPinned: !g.isPinned } : g)
-      })),
-
       deleteExpense: (groupId, expenseId) => set((state) => ({
+        groups: state.groups.map((g) => g.id === groupId ? { ...g, expenses: g.expenses.filter((e) => e.id !== expenseId) } : g)
+      })),
+      editExpense: (groupId, expenseId, updatedData) => set((state) => ({
         groups: state.groups.map((g) => {
           if (g.id !== groupId) return g;
-          return { ...g, expenses: g.expenses.filter((e) => e.id !== expenseId) };
+          return { ...g, expenses: g.expenses.map((e) => e.id === expenseId ? { ...e, ...updatedData } : e) };
         })
+      })),
+
+      // --- MEMBER ACTIONS ---
+      addMember: (groupId, name) => set((state) => ({
+        groups: state.groups.map((g) => g.id === groupId ? { ...g, members: [...g.members, { id: crypto.randomUUID(), name }] } : g)
+      })),
+      removeMember: (groupId, memberId) => set((state) => ({
+        groups: state.groups.map((g) => g.id === groupId ? { ...g, members: g.members.filter((m) => m.id !== memberId) } : g)
       })),
     }),
     { name: 'billblend-storage' }

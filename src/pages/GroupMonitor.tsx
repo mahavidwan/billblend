@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { calculateSettlements } from '../utils/settlement';
-import { ArrowLeft, Plus, ReceiptText, Scale, Share2, Check, Trash2 } from 'lucide-react';
+import { ArrowLeft, Plus, ReceiptText, Scale, Share2, Check, Trash2, Edit2, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type Tab = 'EXPENSES' | 'BALANCES' | 'SETTLE';
@@ -37,12 +37,6 @@ export default function GroupMonitor() {
     }
   };
 
-  const handleDeleteExpense = (expenseId: string, desc: string) => {
-    if (window.confirm(`Delete the expense "${desc}"? This will recalculate all balances.`)) {
-      deleteExpense(group.id, expenseId);
-    }
-  };
-
   const totalSpent = group.expenses.reduce((sum, exp) => sum + exp.amount, 0);
   const settlements = calculateSettlements(group);
   const getMemberName = (memberId: string) => group.members.find(m => m.id === memberId)?.name || 'Unknown';
@@ -54,12 +48,17 @@ export default function GroupMonitor() {
           <button onClick={() => navigate('/')} className="flex items-center gap-2 text-brand-100 active:scale-95">
             <ArrowLeft className="w-5 h-5" /> <span className="font-medium">Dashboard</span>
           </button>
-          <button onClick={handleShare} className="bg-brand-600 p-2 rounded-full hover:bg-brand-500 active:scale-95 transition-all flex items-center gap-2">
-            {copied ? <Check className="w-5 h-5 text-accent-500" /> : <Share2 className="w-5 h-5" />}
-            {copied && <span className="text-xs font-bold text-accent-500 mr-1">Copied!</span>}
-          </button>
+          
+          <div className="flex items-center gap-3">
+            <button onClick={handleShare} className="bg-brand-600 p-2 rounded-full hover:bg-brand-500 active:scale-95 transition-all">
+              {copied ? <Check className="w-5 h-5 text-accent-500" /> : <Share2 className="w-5 h-5" />}
+            </button>
+            <button onClick={() => navigate(`/group/${group.id}/settings`)} className="bg-brand-600 p-2 rounded-full hover:bg-brand-500 active:scale-95 transition-all">
+              <Settings className="w-5 h-5" />
+            </button>
+          </div>
         </div>
-        <h1 className="text-3xl font-bold mb-1">{group.name}</h1>
+        <h1 className="text-3xl font-bold mb-1 pr-10">{group.name}</h1>
         <p className="text-brand-100 font-medium">Total Spent: <span className="text-white font-bold text-lg">₹{totalSpent.toFixed(2)}</span></p>
       </div>
 
@@ -75,7 +74,6 @@ export default function GroupMonitor() {
         <AnimatePresence mode="wait">
           <motion.div key={activeTab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
             
-            {/* EXPENSES TAB WITH DELETE BUTTON */}
             {activeTab === 'EXPENSES' && (
               <div className="space-y-3">
                 {group.expenses.length === 0 ? (
@@ -85,22 +83,24 @@ export default function GroupMonitor() {
                   </div>
                 ) : (
                   group.expenses.map((exp) => (
-                    <div key={exp.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center group/item">
+                    <div key={exp.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center">
                       <div>
                         <h4 className="font-bold text-slate-800">{exp.description}</h4>
                         <p className="text-xs text-slate-500 mt-1">Paid by <span className="font-semibold text-brand-600">{getMemberName(exp.paidBy)}</span></p>
                       </div>
                       <div className="flex items-center gap-3">
-                        <div className="text-right">
+                        <div className="text-right mr-1">
                           <span className="font-bold text-lg text-slate-800">₹{exp.amount.toFixed(2)}</span>
                           <p className="text-[10px] text-slate-400 uppercase tracking-wider mt-1">{exp.splitType.replace('_', ' ')}</p>
                         </div>
-                        <button 
-                          onClick={() => handleDeleteExpense(exp.id, exp.description)}
-                          className="p-2 text-slate-300 hover:text-red-500 active:scale-90 transition-all bg-slate-50 rounded-lg"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex flex-col gap-1 border-l border-slate-100 pl-3">
+                          <button onClick={() => navigate(`/group/${group.id}/expense/${exp.id}/edit`)} className="p-1.5 text-slate-400 hover:text-brand-600 active:scale-90 transition-all bg-slate-50 rounded-md">
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => { if(window.confirm('Delete this expense?')) deleteExpense(group.id, exp.id) }} className="p-1.5 text-slate-400 hover:text-red-500 active:scale-90 transition-all bg-slate-50 rounded-md">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))
@@ -108,7 +108,7 @@ export default function GroupMonitor() {
               </div>
             )}
 
-            {/* BALANCES TAB */}
+            {/* Balances and Settle tabs remain visually exactly the same */}
             {activeTab === 'BALANCES' && (
               <div className="space-y-3">
                 {group.members.map(member => {
@@ -118,16 +118,15 @@ export default function GroupMonitor() {
                     const split = exp.splits.find(s => s.memberId === member.id);
                     if (split) balance -= split.amount;
                   });
-                  const isPositive = balance > 0;
-                  const isNegative = balance < 0;
+                  const isPos = balance > 0; const isNeg = balance < 0;
                   return (
                     <div key={member.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-600">{member.name.charAt(0).toUpperCase()}</div>
                         <span className="font-bold text-slate-800">{member.name}</span>
                       </div>
-                      <div className={`text-right font-bold ${isPositive ? 'text-accent-500' : isNegative ? 'text-red-500' : 'text-slate-400'}`}>
-                        {isPositive ? '+' : ''}₹{balance.toFixed(2)}
+                      <div className={`text-right font-bold ${isPos ? 'text-accent-500' : isNeg ? 'text-red-500' : 'text-slate-400'}`}>
+                        {isPos ? '+' : ''}₹{balance.toFixed(2)}
                       </div>
                     </div>
                   );
@@ -135,7 +134,6 @@ export default function GroupMonitor() {
               </div>
             )}
 
-            {/* SETTLE UP TAB */}
             {activeTab === 'SETTLE' && (
               <div className="space-y-3">
                 {settlements.length === 0 ? (
