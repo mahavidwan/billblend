@@ -16,6 +16,7 @@ export interface Expense {
   date: string; 
   splitType: SplitType;
   splits: SplitItem[]; 
+  isSettled?: boolean; // NEW: Mid-way checkpoint flag
 }
 
 export interface Member {
@@ -42,12 +43,13 @@ interface AppState {
   deleteGroup: (id: string) => void;
   togglePinGroup: (id: string) => void;
   
-  // Expenses
   addExpense: (groupId: string, expense: Omit<Expense, 'id' | 'date'>) => void;
   deleteExpense: (groupId: string, expenseId: string) => void;
   editExpense: (groupId: string, expenseId: string, updatedData: Omit<Expense, 'id' | 'date'>) => void;
+  
+  // NEW: Settle all current active expenses in a group
+  settleAllExpenses: (groupId: string) => void;
 
-  // Members
   addMember: (groupId: string, name: string) => void;
   removeMember: (groupId: string, memberId: string) => void;
 }
@@ -60,10 +62,7 @@ export const useStore = create<AppState>()(
 
       createGroup: (name, memberNames) => {
         const newGroup: Group = {
-          id: crypto.randomUUID(), 
-          name,
-          createdAt: new Date().toISOString(),
-          isPinned: false,
+          id: crypto.randomUUID(), name, createdAt: new Date().toISOString(), isPinned: false,
           members: memberNames.map((n) => ({ id: crypto.randomUUID(), name: n })),
           expenses: [],
         };
@@ -71,7 +70,6 @@ export const useStore = create<AppState>()(
         return newGroup.id;
       },
       setActiveGroup: (id) => set({ activeGroupId: id }),
-      
       importGroup: (importedGroup) => set((state) => {
         const exists = state.groups.some(g => g.id === importedGroup.id);
         if (exists) return { groups: state.groups.map(g => g.id === importedGroup.id ? importedGroup : g) };
@@ -80,11 +78,11 @@ export const useStore = create<AppState>()(
       deleteGroup: (id) => set((state) => ({ groups: state.groups.filter((g) => g.id !== id) })),
       togglePinGroup: (id) => set((state) => ({ groups: state.groups.map((g) => g.id === id ? { ...g, isPinned: !g.isPinned } : g) })),
 
-      // --- EXPENSE ACTIONS ---
       addExpense: (groupId, newExpenseData) => set((state) => ({
         groups: state.groups.map((group) => {
           if (group.id !== groupId) return group;
-          const newExpense: Expense = { ...newExpenseData, id: crypto.randomUUID(), date: new Date().toISOString() };
+          // By default, new expenses are NOT settled
+          const newExpense: Expense = { ...newExpenseData, id: crypto.randomUUID(), date: new Date().toISOString(), isSettled: false };
           return { ...group, expenses: [newExpense, ...group.expenses] };
         }),
       })),
@@ -98,7 +96,18 @@ export const useStore = create<AppState>()(
         })
       })),
 
-      // --- MEMBER ACTIONS ---
+      // --- NEW CHECKPOINT ENGINE ---
+      settleAllExpenses: (groupId) => set((state) => ({
+        groups: state.groups.map((g) => {
+          if (g.id !== groupId) return g;
+          return {
+            ...g,
+            // Mark every existing expense as settled
+            expenses: g.expenses.map((e) => ({ ...e, isSettled: true }))
+          };
+        })
+      })),
+
       addMember: (groupId, name) => set((state) => ({
         groups: state.groups.map((g) => g.id === groupId ? { ...g, members: [...g.members, { id: crypto.randomUUID(), name }] } : g)
       })),

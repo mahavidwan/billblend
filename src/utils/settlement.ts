@@ -1,5 +1,4 @@
-// FIX: Added 'type' keyword here!
-import type { Group } from '../store';
+import type { Member, Expense } from '../store';
 
 export interface Transaction {
   from: string; // memberId
@@ -7,13 +6,13 @@ export interface Transaction {
   amount: number;
 }
 
-export function calculateSettlements(group: Group): Transaction[] {
-  // Step 1: Calculate net balance for each person
+// FIX: We now accept specific members and expenses instead of the whole Group object
+export function calculateSettlements(members: Member[], expenses: Expense[]): Transaction[] {
   const balances: Record<string, number> = {};
   
-  group.members.forEach(m => balances[m.id] = 0);
+  members.forEach(m => balances[m.id] = 0);
 
-  group.expenses.forEach(exp => {
+  expenses.forEach(exp => {
     if (balances[exp.paidBy] !== undefined) {
       balances[exp.paidBy] += exp.amount; 
     }
@@ -24,7 +23,6 @@ export function calculateSettlements(group: Group): Transaction[] {
     });
   });
 
-  // Step 2: Separate into Debtors and Creditors
   const debtors = Object.keys(balances)
     .map(id => ({ id, amount: balances[id] }))
     .filter(x => x.amount <= -0.01)
@@ -35,7 +33,6 @@ export function calculateSettlements(group: Group): Transaction[] {
     .filter(x => x.amount >= 0.01)
     .sort((a, b) => b.amount - a.amount);
 
-  // Step 3: Greedy matching
   const transactions: Transaction[] = [];
   let i = 0; 
   let j = 0; 
