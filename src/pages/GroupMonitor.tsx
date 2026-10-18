@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { calculateSettlements } from '../utils/settlement';
-import { ArrowLeft, Plus, ReceiptText, Scale, HandCoins } from 'lucide-react';
+import { ArrowLeft, Plus, ReceiptText, Scale } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type Tab = 'EXPENSES' | 'BALANCES' | 'SETTLE';
