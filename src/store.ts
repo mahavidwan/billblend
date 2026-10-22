@@ -2,54 +2,33 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 export type SplitType = 'EQUAL' | 'UNEQUAL' | 'ON_BEHALF';
+export type Theme = 'light' | 'dark' | 'system';
 
-export interface SplitItem {
-  memberId: string;
-  amount: number; 
-}
-
+export interface SplitItem { memberId: string; amount: number; }
 export interface Expense {
-  id: string;
-  description: string;
-  amount: number;
-  paidBy: string; 
-  date: string; 
-  splitType: SplitType;
-  splits: SplitItem[]; 
-  isSettled?: boolean; // NEW: Mid-way checkpoint flag
+  id: string; description: string; amount: number; paidBy: string; 
+  date: string; splitType: SplitType; splits: SplitItem[]; isSettled?: boolean;
 }
-
-export interface Member {
-  id: string;
-  name: string;
-}
-
+export interface Member { id: string; name: string; }
 export interface Group {
-  id: string;
-  name: string;
-  createdAt: string;
-  isPinned?: boolean;
-  members: Member[];
-  expenses: Expense[];
+  id: string; name: string; createdAt: string; isPinned?: boolean; members: Member[]; expenses: Expense[];
 }
 
 interface AppState {
+  theme: Theme;
   groups: Group[];
   activeGroupId: string | null;
   
+  setTheme: (theme: Theme) => void;
   createGroup: (name: string, members: string[]) => string;
   setActiveGroup: (id: string | null) => void;
   importGroup: (group: Group) => void; 
   deleteGroup: (id: string) => void;
   togglePinGroup: (id: string) => void;
-  
   addExpense: (groupId: string, expense: Omit<Expense, 'id' | 'date'>) => void;
   deleteExpense: (groupId: string, expenseId: string) => void;
   editExpense: (groupId: string, expenseId: string, updatedData: Omit<Expense, 'id' | 'date'>) => void;
-  
-  // NEW: Settle all current active expenses in a group
   settleAllExpenses: (groupId: string) => void;
-
   addMember: (groupId: string, name: string) => void;
   removeMember: (groupId: string, memberId: string) => void;
 }
@@ -57,17 +36,18 @@ interface AppState {
 export const useStore = create<AppState>()(
   persist(
     (set) => ({
+      theme: 'system', // Default to system theme
       groups: [],
       activeGroupId: null,
+
+      setTheme: (theme) => set({ theme }),
 
       createGroup: (name, memberNames) => {
         const newGroup: Group = {
           id: crypto.randomUUID(), name, createdAt: new Date().toISOString(), isPinned: false,
-          members: memberNames.map((n) => ({ id: crypto.randomUUID(), name: n })),
-          expenses: [],
+          members: memberNames.map((n) => ({ id: crypto.randomUUID(), name: n })), expenses: [],
         };
-        set((state) => ({ groups: [newGroup, ...state.groups] }));
-        return newGroup.id;
+        set((state) => ({ groups: [newGroup, ...state.groups] })); return newGroup.id;
       },
       setActiveGroup: (id) => set({ activeGroupId: id }),
       importGroup: (importedGroup) => set((state) => {
@@ -81,7 +61,6 @@ export const useStore = create<AppState>()(
       addExpense: (groupId, newExpenseData) => set((state) => ({
         groups: state.groups.map((group) => {
           if (group.id !== groupId) return group;
-          // By default, new expenses are NOT settled
           const newExpense: Expense = { ...newExpenseData, id: crypto.randomUUID(), date: new Date().toISOString(), isSettled: false };
           return { ...group, expenses: [newExpense, ...group.expenses] };
         }),
@@ -95,19 +74,12 @@ export const useStore = create<AppState>()(
           return { ...g, expenses: g.expenses.map((e) => e.id === expenseId ? { ...e, ...updatedData } : e) };
         })
       })),
-
-      // --- NEW CHECKPOINT ENGINE ---
       settleAllExpenses: (groupId) => set((state) => ({
         groups: state.groups.map((g) => {
           if (g.id !== groupId) return g;
-          return {
-            ...g,
-            // Mark every existing expense as settled
-            expenses: g.expenses.map((e) => ({ ...e, isSettled: true }))
-          };
+          return { ...g, expenses: g.expenses.map((e) => ({ ...e, isSettled: true })) };
         })
       })),
-
       addMember: (groupId, name) => set((state) => ({
         groups: state.groups.map((g) => g.id === groupId ? { ...g, members: [...g.members, { id: crypto.randomUUID(), name }] } : g)
       })),

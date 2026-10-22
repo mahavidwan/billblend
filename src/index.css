@@ -4,9 +4,8 @@
 
 @layer base {
   body {
-    /* Off-white pearl background, dark slate text */
-    @apply bg-slate-50 text-slate-800 antialiased selection:bg-brand-500 selection:text-white;
-    /* This prevents pull-to-refresh on mobile browsers for a native app feel */
+    /* Added dark mode global backgrounds and text colors */
+    @apply bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 antialiased selection:bg-brand-500 selection:text-white transition-colors duration-300;
     overscroll-behavior-y: none; 
   }
 }
