@@ -1,0 +1,57 @@
+# Privacy Policy for BillBlend:
+
+
+**Effective Date:** November 5, 2026  
+**Developer:** Debanjan Sarkar  
+
+Welcome to **BillBlend** ("we," "our," or "us"). BillBlend is a progressive web application designed to help users track shared expenses and settle debts seamlessly. 
+
+Because we believe in complete data ownership and privacy, BillBlend is built with a **local-first, decentralized architecture**. This Privacy Policy explains how your information is collected, used, and protected.
+
+## 1. Information We Collect and How We Use It
+
+BillBlend operates differently from traditional applications. **We do not own, operate, or maintain any central database servers.** 
+
+### A. Local Device Data
+When you use BillBlend without logging in, all data you create (such as group names, member names, and financial expenses) is stored strictly in your browser's local storage (`localStorage`). We have absolute zero visibility into this data, and it never leaves your device unless you explicitly choose to share it.
+
+### B. Google Account Information
+If you choose to enable "Cloud Sync" by logging in with your Google account, we request access to the following basic profile information via Google OAuth:
+*   **Name & Profile Picture:** Used solely to display your avatar and name within the app's user interface.
+*   **Email Address:** Used to uniquely identify your active session on your device.
+
+*This profile data is cached strictly on your local device to keep you logged in. It is never transmitted to or stored on any server owned by the developer.*
+
+### C. Google Drive Data (Cloud Sync)
+To provide cross-device synchronization without forcing you to use a centralized server, BillBlend requests access to a restricted, hidden folder in your Google Drive using the `https://www.googleapis.com/auth/drive.appdata` scope.
+
+*   **How it works:** When you sync your data, BillBlend writes a lightweight JSON file containing your trips and expenses directly to your personal Google Drive. 
+*   **Restricted Access:** The app only has access to the specific files it creates within this hidden application data folder. It **cannot** read, view, or modify any of your personal files, photos, or documents in your Google Drive.
+*   **Developer Access:** The developer of BillBlend has **no access** to your Google Drive, your application data folder, or your financial logs.
+
+## 2. Third-Party Data Sharing
+
+Because your data lives exclusively on your local device and within your personal Google Drive, **we do not sell, trade, rent, or share your personal or financial information with any third parties.** 
+
+## 3. Google API Services User Data Policy
+
+BillBlend's use and transfer of information received from Google APIs to any other app will adhere to the [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy), including the Limited Use requirements.
+
+## 4. Your Control and Data Deletion
+
+You have complete control over your data:
+*   **Delinking Google Drive:** You can disconnect your Google account at any time via the app's sidebar. This will instantly remove your Google credentials from your device's local storage and halt all cloud synchronization.
+*   **Deleting App Data:** Because data is stored in your Google Drive's Application Data folder, you can permanently delete your cloud backups at any time by going to your Google Drive Settings -> Manage Apps -> BillBlend -> "Delete hidden app data".
+*   **Local Deletion:** Clearing your browser data/cache will instantly delete all local instances of your BillBlend data.
+
+## 5. Changes to This Privacy Policy
+
+We may update this Privacy Policy from time to time to reflect changes in our app's functionality or legal requirements. Since we do not collect email addresses centrally, we cannot notify you directly. We encourage you to review this page periodically.
+
+## 6. Contact Us
+
+If you have any questions, concerns, or suggestions regarding this Privacy Policy or how BillBlend handles your data, please contact the developer:
+
+**Debanjan Sarkar**  
+**Email:** debanjan.dataguy@gmail.com  
+**GitHub:** [https://github.com/mahavidwan](https://github.com/mahavidwan)

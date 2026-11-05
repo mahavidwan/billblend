@@ -14,12 +14,24 @@ export interface Group {
   id: string; name: string; createdAt: string; isPinned?: boolean; members: Member[]; expenses: Expense[];
 }
 
+// NEW: Cloud User Interface
+export interface CloudUser {
+  name: string;
+  email: string;
+  picture: string;
+  accessToken: string;
+  tokenExpiry: number;
+}
+
 interface AppState {
   theme: Theme;
   groups: Group[];
   activeGroupId: string | null;
+  cloudUser: CloudUser | null; // NEW STATE
   
   setTheme: (theme: Theme) => void;
+  setCloudUser: (user: CloudUser | null) => void; // NEW ACTION
+  
   createGroup: (name: string, members: string[]) => string;
   setActiveGroup: (id: string | null) => void;
   importGroup: (group: Group) => void; 
@@ -36,11 +48,13 @@ interface AppState {
 export const useStore = create<AppState>()(
   persist(
     (set) => ({
-      theme: 'system', // Default to system theme
+      theme: 'system',
       groups: [],
       activeGroupId: null,
+      cloudUser: null, // Default to not logged in
 
       setTheme: (theme) => set({ theme }),
+      setCloudUser: (cloudUser) => set({ cloudUser }),
 
       createGroup: (name, memberNames) => {
         const newGroup: Group = {
