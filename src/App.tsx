@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+// 🚨 NEW: Imported useLocation for analytics tracking
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { WalletCards, Sun, Moon, Monitor, User } from 'lucide-react';
 import { useStore } from './store';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { triggerGlobalSync } from './utils/cloudSync';
+// 🚨 NEW: Google Analytics Package
+import ReactGA from "react-ga4";
 
 import Dashboard from './pages/Dashboard';
 import CreateGroup from './pages/CreateGroup';
@@ -14,8 +17,28 @@ import GroupSettings from './pages/GroupSettings';
 import Guide from './pages/Guide';
 import Sidebar from './components/Sidebar';
 
-// Pull Client ID securely from environment variables
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+// 🚨 NEW: Securely pull the GA4 ID
+const GA_MEASUREMENT_ID = import.meta.env.VITE_GA_MEASUREMENT_ID;
+
+// Initialize Google Analytics exactly once when the app loads
+if (GA_MEASUREMENT_ID) {
+  ReactGA.initialize(GA_MEASUREMENT_ID);
+}
+
+// --- GOOGLE ANALYTICS ROUTE TRACKER ---
+function RouteTracker() {
+  const location = useLocation();
+
+  useEffect(() => {
+    // Send a pageview ping to Google every time the user navigates
+    if (GA_MEASUREMENT_ID) {
+      ReactGA.send({ hitType: "pageview", page: location.pathname + location.search });
+    }
+  }, [location]);
+
+  return null;
+}
 
 // --- HYBRID AUTO-SYNC ENGINE ---
 function AutoSyncManager() {
@@ -23,15 +46,8 @@ function AutoSyncManager() {
 
   useEffect(() => {
     if (!cloudUser) return;
-
-    // 1. Sync immediately when the app opens
     triggerGlobalSync();
-
-    // 2. Sync repeatedly every 2 minutes (120,000 milliseconds)
-    const intervalId = setInterval(() => {
-      triggerGlobalSync();
-    }, 2 * 60 * 1000);
-
+    const intervalId = setInterval(() => { triggerGlobalSync(); }, 2 * 60 * 1000);
     return () => clearInterval(intervalId);
   }, [cloudUser]);
 
@@ -76,7 +92,8 @@ export default function App() {
     <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
       <Router>
         <ThemeManager />
-        <AutoSyncManager /> {/* <-- Silently running in background! */}
+        <AutoSyncManager /> 
+        <RouteTracker /> {/* <-- Silently pings GA4 on page change! */}
         <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
         <div className="min-h-screen bg-slate-200 dark:bg-black flex justify-center font-sans transition-colors duration-300">
@@ -96,7 +113,6 @@ export default function App() {
                   {theme === 'system' && <Monitor className="w-5 h-5" />}
                 </button>
                 
-                {/* 🚨 FIX: Added referrerPolicy to prevent broken header image */}
                 <button onClick={() => setIsSidebarOpen(true)} className="w-8 h-8 rounded-full bg-brand-600/50 dark:bg-slate-800 border border-brand-500 dark:border-slate-700 flex items-center justify-center text-xs font-bold text-brand-50 dark:text-slate-300 hover:bg-brand-600 transition-all active:scale-90 overflow-hidden">
                   {cloudUser ? <img src={cloudUser.picture} alt="Profile" referrerPolicy="no-referrer" className="w-full h-full object-cover" /> : <User className="w-4 h-4" />}
                 </button>

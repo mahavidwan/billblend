@@ -2,19 +2,32 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { exportGroupToJSON } from '../utils/export';
-import { ArrowLeft, UserPlus, Trash2, ShieldAlert, FileJson } from 'lucide-react';
+import { ArrowLeft, UserPlus, Trash2, ShieldAlert, FileJson, Edit2, Check, PenLine } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export default function GroupSettings() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const group = useStore(state => state.groups.find(g => g.id === id));
+  
   const addMember = useStore(state => state.addMember);
   const removeMember = useStore(state => state.removeMember);
+  const renameGroup = useStore(state => state.renameGroup);
 
   const [newMemberName, setNewMemberName] = useState('');
+  
+  // 🚨 NEW: Rename State
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState(group?.name || '');
 
   if (!group) return null;
+
+  const handleRename = () => {
+    if (editedName.trim() && editedName.trim() !== group.name) {
+      renameGroup(group.id, editedName.trim());
+    }
+    setIsEditingName(false); // Lock it back
+  };
 
   const handleAddMember = () => {
     if (newMemberName.trim()) {
@@ -45,54 +58,68 @@ export default function GroupSettings() {
 
       <div className="p-4 space-y-6">
         
-        {/* NEW: Export Data Section */}
+        {/* 🚨 NEW: RENAME TRIP SECTION */}
+        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 transition-colors duration-300">
+          <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-1 flex items-center gap-2 transition-colors">
+            <PenLine className="w-4 h-4 text-brand-500 dark:text-brand-400" /> Trip Name
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 transition-colors">Tap the pencil to rename this trip.</p>
+          
+          <div className="flex items-center gap-2 w-full">
+            <input 
+              type="text" 
+              value={editedName} 
+              onChange={(e) => setEditedName(e.target.value)} 
+              disabled={!isEditingName}
+              className={`flex-1 min-w-0 p-3 rounded-xl border focus:outline-none transition-all duration-300 ${
+                isEditingName 
+                  ? 'bg-white dark:bg-slate-950 border-brand-500 dark:border-brand-500 text-slate-800 dark:text-slate-100 ring-2 ring-brand-500/20 shadow-sm' 
+                  : 'bg-slate-100 dark:bg-slate-800/50 border-transparent text-slate-500 dark:text-slate-400 cursor-not-allowed opacity-80'
+              }`} 
+            />
+            {isEditingName ? (
+              <button onClick={handleRename} className="shrink-0 bg-accent-500 hover:bg-accent-600 text-white p-3.5 rounded-xl font-bold active:scale-95 transition-all">
+                <Check className="w-5 h-5" />
+              </button>
+            ) : (
+              <button onClick={() => setIsEditingName(true)} className="shrink-0 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 p-3.5 rounded-xl font-bold active:scale-95 transition-all">
+                <Edit2 className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* EXPORT DATA */}
         <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 transition-colors duration-300">
           <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-2 transition-colors">Export & Share Data</h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 transition-colors">
-            For extremely large trips, the Magic Link URL might be too long to send via WhatsApp. You can download the raw Trip Data file here and share it with friends to import!
+            For extremely large trips, the Magic Link URL might be too long to send. Download the raw Trip Data file here and share it with friends to import!
           </p>
-          <button 
-            onClick={() => exportGroupToJSON(group)}
-            className="w-full bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 text-white font-bold py-3 rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2"
-          >
+          <button onClick={() => exportGroupToJSON(group)} className="w-full bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 text-white font-bold py-3 rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2">
             <FileJson className="w-5 h-5" /> Download Trip File (.json)
           </button>
         </div>
 
+        {/* ADD MEMBER */}
         <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 transition-colors duration-300">
           <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-3 flex items-center gap-2 transition-colors"><UserPlus className="w-5 h-5 text-brand-500 dark:text-brand-400" /> Add New Member</h3>
           <div className="flex items-center gap-2 w-full">
-            <input 
-              type="text" value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="Enter name..." 
-              className="flex-1 min-w-0 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 dark:focus:ring-brand-400 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 transition-colors" 
-            />
-            <button 
-              onClick={handleAddMember} disabled={!newMemberName.trim()} 
-              className="shrink-0 whitespace-nowrap bg-brand-600 dark:bg-brand-700 disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:text-slate-500 text-white px-5 py-3 rounded-xl font-bold active:scale-95 transition-all"
-            >
-              Add
-            </button>
+            <input type="text" value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="Enter name..." className="flex-1 min-w-0 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 dark:focus:ring-brand-400 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 transition-colors" />
+            <button onClick={handleAddMember} disabled={!newMemberName.trim()} className="shrink-0 whitespace-nowrap bg-brand-600 dark:bg-brand-700 disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:text-slate-500 text-white px-5 py-3 rounded-xl font-bold active:scale-95 transition-all">Add</button>
           </div>
         </div>
 
+        {/* MANAGE MEMBERS */}
         <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 transition-colors duration-300">
           <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-1 transition-colors">Manage Members</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 flex items-start gap-1 transition-colors">
-            <ShieldAlert className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" /> Members involved in expenses cannot be removed to protect calculation accuracy.
-          </p>
-          
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 flex items-start gap-1 transition-colors"><ShieldAlert className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" /> Members involved in expenses cannot be removed to protect calculation accuracy.</p>
           <div className="space-y-3">
             {group.members.map((member) => {
               const isEngaged = group.expenses.some(exp => exp.paidBy === member.id || exp.splits.some(s => s.memberId === member.id));
               return (
                 <div key={member.id} className="flex justify-between items-center p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-100 dark:border-slate-800 transition-colors">
                   <span className="font-bold text-slate-700 dark:text-slate-300 transition-colors">{member.name}</span>
-                  <button 
-                    onClick={() => handleRemoveMember(member.id, member.name)}
-                    className={`p-2 rounded-lg transition-all ${isEngaged ? 'text-slate-300 dark:text-slate-600 bg-slate-100 dark:bg-slate-800/50 cursor-not-allowed' : 'text-red-400 dark:text-red-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 active:scale-90'}`}
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
+                  <button onClick={() => handleRemoveMember(member.id, member.name)} className={`p-2 rounded-lg transition-all ${isEngaged ? 'text-slate-300 dark:text-slate-600 bg-slate-100 dark:bg-slate-800/50 cursor-not-allowed' : 'text-red-400 dark:text-red-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 active:scale-90'}`}><Trash2 className="w-5 h-5" /></button>
                 </div>
               );
             })}

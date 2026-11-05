@@ -40,6 +40,7 @@ export interface AppState {
   createGroup: (name: string, members: string[]) => string;
   setActiveGroup: (id: string | null) => void;
   importGroup: (group: Group) => void; 
+  renameGroup: (id: string, newName: string) => void;
   deleteGroup: (id: string) => void;
   togglePinGroup: (id: string) => void;
   addExpense: (groupId: string, expense: Omit<Expense, 'id' | 'date' | 'updatedAt'>) => void;
@@ -80,6 +81,9 @@ export const useStore = create<AppState>()(
         if (exists) return { groups: state.groups.map(g => g.id === importedGroup.id ? importedGroup : g) };
         return { groups: [importedGroup, ...state.groups] };
       }),
+      renameGroup: (id, newName) => set((state) => ({
+        groups: state.groups.map((g) => g.id === id ? { ...g, name: newName, updatedAt: Date.now() } : g)
+      })),
       deleteGroup: (id) => set((state) => ({ 
         groups: state.groups.filter((g) => g.id !== id),
         deletedGroups: [...state.deletedGroups, { id, deletedAt: Date.now() }] // Record Tombstone
