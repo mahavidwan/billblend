@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import type { Expense } from '../store';
 import { calculateSettlements } from '../utils/settlement';
-import { exportGroupToCSV } from '../utils/export';
+// 🚨 NEW: Imported exportGroupToJSON to power the Smart Share fallback
+import { exportGroupToCSV, exportGroupToJSON } from '../utils/export';
 import { ArrowLeft, Plus, ReceiptText, Scale, Share2, Check, Trash2, Edit2, Settings, ShieldCheck, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -22,12 +23,25 @@ export default function GroupMonitor() {
 
   if (!group) return <div className="p-8 text-center dark:text-slate-200"><h2 className="text-xl font-bold">Group not found</h2><button onClick={() => navigate('/')}>Go back</button></div>;
 
+  // 🚨 SMART SHARE ENGINE
   const handleShare = async () => {
     const encodedData = btoa(encodeURIComponent(JSON.stringify(group)));
+    const shareUrl = `${window.location.origin}/import?data=${encodedData}`;
+
+    // WhatsApp and Telegram break links around 2000 characters. 1800 is our safe limit.
+    if (shareUrl.length > 1800) {
+      alert("⚠️ Trip too large for a Magic Link!\n\nMessaging apps limit link lengths, which will break this share. Instead, we are downloading a secure .json Backup File. Send this file to your friends to import!");
+      exportGroupToJSON(group); // Automatically trigger JSON download!
+      return;
+    }
+
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}/import?data=${encodedData}`);
-      setCopied(true); setTimeout(() => setCopied(false), 3000);
-    } catch { alert("Failed to copy link."); }
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true); 
+      setTimeout(() => setCopied(false), 3000);
+    } catch { 
+      alert("Failed to copy link."); 
+    }
   };
 
   const handleSettleUp = () => {
@@ -73,10 +87,10 @@ export default function GroupMonitor() {
           <button onClick={() => navigate('/')} className="flex items-center gap-2 text-brand-100 dark:text-slate-300 hover:text-white transition-colors active:scale-95"><ArrowLeft className="w-5 h-5" /> <span className="font-medium">Dashboard</span></button>
           
           <div className="flex items-center gap-2">
-            <button onClick={() => exportGroupToCSV(group)} className="bg-brand-600 dark:bg-slate-800 p-2 rounded-full hover:bg-brand-500 dark:hover:bg-slate-700 active:scale-95 transition-all text-white dark:text-brand-400">
+            <button onClick={() => exportGroupToCSV(group)} className="bg-brand-600 dark:bg-slate-800 p-2 rounded-full hover:bg-brand-500 dark:hover:bg-slate-700 active:scale-95 transition-all text-white dark:text-brand-400" title="Export to Excel">
               <Download className="w-5 h-5" />
             </button>
-            <button onClick={handleShare} className="bg-brand-600 dark:bg-slate-800 p-2 rounded-full hover:bg-brand-500 dark:hover:bg-slate-700 active:scale-95 transition-all text-white dark:text-brand-400">
+            <button onClick={handleShare} className="bg-brand-600 dark:bg-slate-800 p-2 rounded-full hover:bg-brand-500 dark:hover:bg-slate-700 active:scale-95 transition-all text-white dark:text-brand-400" title="Share Trip">
               {copied ? <Check className="w-5 h-5 text-accent-500" /> : <Share2 className="w-5 h-5" />}
             </button>
             <button onClick={() => navigate(`/group/${group.id}/settings`)} className="bg-brand-600 dark:bg-slate-800 p-2 rounded-full hover:bg-brand-500 dark:hover:bg-slate-700 active:scale-95 transition-all text-white dark:text-brand-400"><Settings className="w-5 h-5" /></button>

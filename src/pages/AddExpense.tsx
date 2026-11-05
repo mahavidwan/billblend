@@ -2,8 +2,8 @@ import { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import type { SplitType, SplitItem } from '../store';
-import { ArrowLeft, CheckCircle2 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export default function AddExpense() {
   const { id, expenseId } = useParams<{ id: string; expenseId?: string }>();
@@ -48,15 +48,22 @@ export default function AddExpense() {
   const isUnequalBalanced = Math.abs(totalAmount - unequalSum) < 0.01;
   const remainingUnequal = totalAmount - unequalSum;
 
-  const isFormValid = () => {
-    if (!description.trim() || totalAmount <= 0) return false;
-    if (splitType === 'UNEQUAL' && !isUnequalBalanced) return false;
-    if (splitType === 'ON_BEHALF' && !onBehalfOf) return false;
-    return true;
+  // 🚨 NEW: Smart Validation Engine
+  const getValidationMessage = () => {
+    if (totalAmount <= 0) return "Please enter a valid amount.";
+    if (!description.trim()) return "Don't forget to add a description!";
+    if (splitType === 'UNEQUAL' && !isUnequalBalanced) {
+      if (remainingUnequal > 0) return `Assign the remaining ₹${remainingUnequal.toFixed(2)}`;
+      return `Amounts exceed total by ₹${Math.abs(remainingUnequal).toFixed(2)}`;
+    }
+    if (splitType === 'ON_BEHALF' && !onBehalfOf) return "Please select who this was paid for.";
+    return null; // Valid!
   };
 
+  const validationMsg = getValidationMessage();
+
   const handleSave = () => {
-    if (!isFormValid()) return;
+    if (validationMsg) return;
     let splits: SplitItem[] = [];
 
     if (splitType === 'EQUAL') {
@@ -76,7 +83,7 @@ export default function AddExpense() {
   };
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="pb-28 min-h-screen transition-colors duration-300">
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="pb-36 min-h-screen transition-colors duration-300">
       <div className="bg-white dark:bg-slate-900 px-4 py-4 flex items-center gap-4 shadow-sm sticky top-0 z-10 border-b border-slate-100 dark:border-slate-800 transition-colors duration-300">
         <button onClick={() => navigate(-1)} className="text-slate-500 dark:text-slate-400 p-1 active:bg-slate-100 dark:active:bg-slate-800 rounded-full transition-colors"><ArrowLeft className="w-6 h-6" /></button>
         <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 transition-colors">{expenseId ? 'Edit Expense' : 'Add Expense'}</h2>
@@ -152,9 +159,25 @@ export default function AddExpense() {
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-t border-slate-100 dark:border-slate-800 flex justify-center z-20 transition-colors duration-300">
-        <div className="w-full max-w-md">
-          <button onClick={handleSave} disabled={!isFormValid()} className="w-full bg-accent-500 dark:bg-accent-600 disabled:bg-slate-300 dark:disabled:bg-slate-800 hover:bg-accent-600 dark:hover:bg-accent-500 text-white disabled:text-slate-500 font-bold text-lg py-4 rounded-xl shadow-lg dark:shadow-none active:scale-[0.98] transition-all flex justify-center items-center gap-2">
+      {/* FIXED BOTTOM SAVE BUTTON WITH DYNAMIC VALIDATION HINT */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-t border-slate-100 dark:border-slate-800 flex flex-col items-center z-20 transition-colors duration-300">
+        <div className="w-full max-w-md relative">
+          
+          {/* THE SMART WARNING BADGE */}
+          <AnimatePresence>
+            {validationMsg && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
+                className="absolute -top-12 left-0 right-0 flex justify-center"
+              >
+                <div className="bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 px-4 py-2 rounded-full text-xs font-bold shadow-sm flex items-center gap-1.5 border border-red-200 dark:border-red-800/50">
+                  <AlertCircle className="w-4 h-4" /> {validationMsg}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <button onClick={handleSave} disabled={!!validationMsg} className="w-full bg-accent-500 dark:bg-accent-600 disabled:bg-slate-300 dark:disabled:bg-slate-800 hover:bg-accent-600 dark:hover:bg-accent-500 text-white disabled:text-slate-500 font-bold text-lg py-4 rounded-xl shadow-lg dark:shadow-none active:scale-[0.98] transition-all flex justify-center items-center gap-2">
             <CheckCircle2 className="w-6 h-6" /> {expenseId ? 'Update Expense' : 'Save Expense'}
           </button>
         </div>

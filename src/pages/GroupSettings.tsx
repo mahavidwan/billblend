@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
-import { ArrowLeft, UserPlus, Trash2, ShieldAlert } from 'lucide-react';
+import { exportGroupToJSON } from '../utils/export';
+import { ArrowLeft, UserPlus, Trash2, ShieldAlert, FileJson } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export default function GroupSettings() {
@@ -43,6 +44,21 @@ export default function GroupSettings() {
       </div>
 
       <div className="p-4 space-y-6">
+        
+        {/* NEW: Export Data Section */}
+        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 transition-colors duration-300">
+          <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-2 transition-colors">Export & Share Data</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 transition-colors">
+            For extremely large trips, the Magic Link URL might be too long to send via WhatsApp. You can download the raw Trip Data file here and share it with friends to import!
+          </p>
+          <button 
+            onClick={() => exportGroupToJSON(group)}
+            className="w-full bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 text-white font-bold py-3 rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2"
+          >
+            <FileJson className="w-5 h-5" /> Download Trip File (.json)
+          </button>
+        </div>
+
         <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 transition-colors duration-300">
           <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-3 flex items-center gap-2 transition-colors"><UserPlus className="w-5 h-5 text-brand-500 dark:text-brand-400" /> Add New Member</h3>
           <div className="flex items-center gap-2 w-full">

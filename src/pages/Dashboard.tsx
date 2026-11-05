@@ -1,13 +1,17 @@
 import { useNavigate } from 'react-router-dom';
-import { useStore } from '../store';
-import { Plus, Users, Receipt, Heart, Pin, Trash2, Lightbulb, ArrowRight } from 'lucide-react';
+import { useStore, type Group } from '../store';
+import { Plus, Users, Receipt, Heart, Pin, Trash2, Lightbulb, ArrowRight, FileJson } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useRef } from 'react';
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const groups = useStore((state) => state.groups);
   const deleteGroup = useStore((state) => state.deleteGroup);
   const togglePinGroup = useStore((state) => state.togglePinGroup);
+  const importGroup = useStore((state) => state.importGroup);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sortedGroups = [...groups].sort((a, b) => {
     if (a.isPinned && !b.isPinned) return -1;
@@ -27,10 +31,46 @@ export default function Dashboard() {
     togglePinGroup(id);
   };
 
+  // 🚨 NEW: File Import Engine
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const jsonString = event.target?.result as string;
+        const groupData = JSON.parse(jsonString) as Group;
+        
+        // Basic structural validation
+        if (!groupData.id || !groupData.name || !groupData.members) {
+          throw new Error("Invalid structure");
+        }
+        
+        importGroup(groupData);
+        alert(`Successfully imported "${groupData.name}"!`);
+      } catch (err) {
+        alert("Invalid file format. Please upload a valid BillBlend .json file.");
+      }
+    };
+    reader.readAsText(file);
+    
+    // Reset the input so the user can import the same file again if they want
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   return (
     <div className="p-4 pb-28 flex flex-col min-h-[calc(100vh-80px)] transition-colors duration-300">
       
-      {/* THE APP GUIDE ANIMATED BANNER (Dark Mode Optimized) */}
+      {/* Hidden File Input */}
+      <input 
+        type="file" 
+        accept=".json" 
+        ref={fileInputRef} 
+        onChange={handleFileUpload} 
+        className="hidden" 
+      />
+
       <motion.button 
         initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
         onClick={() => navigate('/guide')}
@@ -60,13 +100,29 @@ export default function Dashboard() {
             </div>
             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-2 transition-colors">No groups yet</h2>
             <p className="text-slate-500 dark:text-slate-400 mb-8 max-w-[250px] transition-colors">Create a group for your trip, event, or apartment to start splitting bills.</p>
-            <button onClick={() => navigate('/create')} className="bg-brand-600 dark:bg-brand-700 hover:bg-brand-700 dark:hover:bg-brand-600 text-white px-6 py-3 rounded-xl font-medium flex items-center gap-2 transition-colors active:scale-95">
-              <Plus className="w-5 h-5" /> Create First Group
-            </button>
+            <div className="flex flex-col gap-3 w-full max-w-[250px]">
+              <button onClick={() => navigate('/create')} className="w-full bg-brand-600 dark:bg-brand-700 hover:bg-brand-700 dark:hover:bg-brand-600 text-white px-6 py-3 rounded-xl font-medium flex justify-center items-center gap-2 transition-colors active:scale-95">
+                <Plus className="w-5 h-5" /> Create First Group
+              </button>
+              {/* Import Button for Empty State */}
+              <button onClick={() => fileInputRef.current?.click()} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 px-6 py-3 rounded-xl font-medium flex justify-center items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors active:scale-95">
+                <FileJson className="w-5 h-5 text-brand-500" /> Import Trip File
+              </button>
+            </div>
           </motion.div>
         ) : (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-            <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-2 transition-colors">Your Trips & Groups</h2>
+            
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 transition-colors">Your Trips & Groups</h2>
+              {/* Subtle Import Icon for populated state */}
+              <button 
+                onClick={() => fileInputRef.current?.click()} 
+                className="text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-brand-100 dark:hover:bg-brand-900/40 transition-colors active:scale-95"
+              >
+                <FileJson className="w-4 h-4" /> Import
+              </button>
+            </div>
             
             {sortedGroups.map((group, index) => {
               const totalSpent = group.expenses.reduce((sum, exp) => sum + exp.amount, 0);
@@ -111,7 +167,7 @@ export default function Dashboard() {
           <span className="font-bold text-slate-600 dark:text-slate-400 tracking-wide transition-colors">Debanjan Sarkar</span>
         </p>
         <div className="bg-slate-200/70 dark:bg-slate-800/80 text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-md transition-colors">
-          Version 5.2.4
+          Version 5.2.7
         </div>
       </div>
     </div>
