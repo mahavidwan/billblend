@@ -4,7 +4,7 @@ import { useStore } from '../store';
 import type { Expense } from '../store';
 import { calculateSettlements, calculateRawDebts, getMemberLedger } from '../utils/settlement';
 import { exportGroupToCSV, exportGroupToJSON } from '../utils/export';
-import { ArrowLeft, Plus, ReceiptText, Scale, Share2, Check, Trash2, Edit2, Settings, ShieldCheck, Download, BarChart3, Info, Zap, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Plus, ReceiptText, Scale, Share2, Check, Trash2, Edit2, Settings, ShieldCheck, Download, BarChart3, Zap, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type Tab = 'EXPENSES' | 'BALANCES' | 'SETTLE' | 'STATS';
