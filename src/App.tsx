@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { WalletCards, Sun, Moon, Monitor, User } from 'lucide-react';
 import { useStore } from './store';
 import { GoogleOAuthProvider } from '@react-oauth/google';
+import { triggerGlobalSync } from './utils/cloudSync';
 
 import Dashboard from './pages/Dashboard';
 import CreateGroup from './pages/CreateGroup';
@@ -13,8 +14,29 @@ import GroupSettings from './pages/GroupSettings';
 import Guide from './pages/Guide';
 import Sidebar from './components/Sidebar';
 
-// 👉 CLIENT ID HERE 👈
+// Pull Client ID securely from environment variables
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
+// --- HYBRID AUTO-SYNC ENGINE ---
+function AutoSyncManager() {
+  const cloudUser = useStore(state => state.cloudUser);
+
+  useEffect(() => {
+    if (!cloudUser) return;
+
+    // 1. Sync immediately when the app opens
+    triggerGlobalSync();
+
+    // 2. Sync repeatedly every 2 minutes (120,000 milliseconds)
+    const intervalId = setInterval(() => {
+      triggerGlobalSync();
+    }, 2 * 60 * 1000);
+
+    return () => clearInterval(intervalId);
+  }, [cloudUser]);
+
+  return null;
+}
 
 function ThemeManager() {
   const theme = useStore(state => state.theme);
@@ -25,9 +47,7 @@ function ThemeManager() {
       if (theme === 'system') {
         const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         root.classList.add(systemTheme);
-      } else {
-        root.classList.add(theme);
-      }
+      } else root.classList.add(theme);
     };
     applyTheme();
     if (theme === 'system') {
@@ -43,8 +63,7 @@ function ThemeManager() {
 export default function App() {
   const theme = useStore(state => state.theme);
   const setTheme = useStore(state => state.setTheme);
-  const cloudUser = useStore(state => state.cloudUser); // GET USER
-  
+  const cloudUser = useStore(state => state.cloudUser);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const cycleTheme = () => {
@@ -57,11 +76,11 @@ export default function App() {
     <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
       <Router>
         <ThemeManager />
+        <AutoSyncManager /> {/* <-- Silently running in background! */}
         <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
         <div className="min-h-screen bg-slate-200 dark:bg-black flex justify-center font-sans transition-colors duration-300">
           <div className="w-full max-w-md bg-slate-50 dark:bg-slate-950 min-h-screen shadow-2xl relative overflow-x-hidden flex flex-col transition-colors duration-300">
-            
             <header className="bg-brand-700 dark:bg-slate-900 text-white px-4 py-4 flex items-center justify-between shadow-md z-20 border-b border-transparent dark:border-slate-800 transition-colors duration-300">
               <Link to="/" className="flex items-center gap-2 active:scale-95 transition-transform">
                 <div className="bg-white dark:bg-slate-800 p-1.5 rounded-lg shadow-sm flex items-center justify-center transition-colors">
@@ -77,16 +96,9 @@ export default function App() {
                   {theme === 'system' && <Monitor className="w-5 h-5" />}
                 </button>
                 
-                {/* DYNAMIC PROFILE AVATAR */}
-                <button 
-                  onClick={() => setIsSidebarOpen(true)}
-                  className="w-8 h-8 rounded-full bg-brand-600/50 dark:bg-slate-800 border border-brand-500 dark:border-slate-700 flex items-center justify-center text-xs font-bold text-brand-50 dark:text-slate-300 hover:bg-brand-600 transition-all active:scale-90 overflow-hidden"
-                >
-                  {cloudUser ? (
-                    <img src={cloudUser.picture} alt="Profile" className="w-full h-full object-cover" />
-                  ) : (
-                    <User className="w-4 h-4" />
-                  )}
+                {/* 🚨 FIX: Added referrerPolicy to prevent broken header image */}
+                <button onClick={() => setIsSidebarOpen(true)} className="w-8 h-8 rounded-full bg-brand-600/50 dark:bg-slate-800 border border-brand-500 dark:border-slate-700 flex items-center justify-center text-xs font-bold text-brand-50 dark:text-slate-300 hover:bg-brand-600 transition-all active:scale-90 overflow-hidden">
+                  {cloudUser ? <img src={cloudUser.picture} alt="Profile" referrerPolicy="no-referrer" className="w-full h-full object-cover" /> : <User className="w-4 h-4" />}
                 </button>
               </div>
             </header>
