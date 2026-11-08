@@ -94,7 +94,10 @@ export default function GroupSettings() {
       try {
         setIsEnablingCollab(true); 
         if (group.firebaseTripId) await cloudEndCollaboration(group.firebaseTripId);
-        endCollaboration(group.id);
+        
+        // 🚨 Appends the local termination message for the Admin
+        endCollaboration(group.id, "You manually ended the collaboration.");
+        
         alert("Collaboration ended. Trip is now local-only.");
       } catch (err) {
         alert("Failed to delete trip from cloud.");
@@ -186,6 +189,19 @@ export default function GroupSettings() {
 
       <div className="p-4 space-y-6">
         
+        {/* 🚨 THE TERMINATION MESSAGE BANNER */}
+        <AnimatePresence>
+          {group.terminationMessage && !group.isCollaborative && (
+            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="bg-red-50 dark:bg-red-900/20 p-4 rounded-2xl border border-red-200 dark:border-red-800/50 flex gap-3">
+              <ServerOff className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-sm font-bold text-red-800 dark:text-red-400 mb-1">Live Sync Disconnected</h3>
+                <p className="text-xs text-red-600 dark:text-red-300 leading-relaxed">{group.terminationMessage}</p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* COLLABORATION CARD */}
         <div className={`p-5 rounded-2xl shadow-sm border transition-colors duration-300 ${group.isCollaborative ? 'bg-gradient-to-br from-brand-600 to-brand-800 border-brand-800 text-white' : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800'}`}>
           <div className="flex justify-between items-start mb-2">
@@ -195,7 +211,6 @@ export default function GroupSettings() {
             {group.isCollaborative && <span className="bg-accent-500 text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider animate-pulse shadow-md">Live</span>}
           </div>
           
-          {/* 🚨 UPDATED UX COPY */}
           <p className={`text-xs mb-4 leading-relaxed ${group.isCollaborative ? 'text-brand-100' : 'text-slate-500 dark:text-slate-400'}`}>
             {group.isCollaborative 
               ? `This trip is live! Friends can join via link. Auto-closes on ${new Date(group.collabExpiresAt || 0).toLocaleDateString()}.` 
@@ -210,7 +225,6 @@ export default function GroupSettings() {
                   <option value={7}>Active for 7 Days</option>
                   <option value={15}>Active for 15 Days</option>
                   <option value={30}>Active for 30 Days</option>
-                  {/* 🚨 ADDED 45 DAYS */}
                   <option value={45}>Active for 45 Days</option> 
                 </select>
               </div>

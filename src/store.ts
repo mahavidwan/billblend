@@ -16,6 +16,7 @@ export interface Group {
   id: string; name: string; createdAt: string; isPinned?: boolean; members: Member[]; expenses: Expense[];
   updatedAt?: number; isCollaborative?: boolean; firebaseTripId?: string; collabExpiresAt?: number; 
   roles?: GroupRoles; 
+  terminationMessage?: string; // 🚨 NEW: Stores the reason it went offline
 }
 export interface CloudUser { name: string; email: string; picture: string; accessToken: string; tokenExpiry: number; }
 export interface Tombstone { id: string; deletedAt: number; }
@@ -39,7 +40,7 @@ export interface AppState {
   enableCollaboration: (groupId: string, firebaseTripId: string, expiresAt: number, adminEmail: string) => void;
 
   // Action to End Collaboration Mode in a trip
-  endCollaboration: (groupId: string) => void;
+  endCollaboration: (groupId: string, reasonMessage?: string) => void;
   
   // 🚨 NEW: Role Management Action
   changeUserRole: (groupId: string, targetEmail: string, newRole: 'admin' | 'editor' | 'viewer') => void;
@@ -124,13 +125,17 @@ export const useStore = create<AppState>()(
         };
       }),
 
-      // 🚨 NEW: Reverts a trip to offline-mode
-      endCollaboration: (groupId) => set((state) => ({
+      // 🚨 FIX: Now accepts a reason string so everyone knows WHY it ended
+      endCollaboration: (groupId, reasonMessage?: string) => set((state) => ({
         groups: state.groups.map((g) => {
           if (g.id !== groupId) return g;
-          // Strip away all cloud properties
+          // Strip away all active cloud properties
           const { isCollaborative, firebaseTripId, collabExpiresAt, roles, ...offlineGroup } = g;
-          return { ...offlineGroup, updatedAt: Date.now() };
+          return { 
+            ...offlineGroup, 
+            updatedAt: Date.now(),
+            terminationMessage: reasonMessage // Save the message to show in the UI!
+          };
         })
       })),
 
