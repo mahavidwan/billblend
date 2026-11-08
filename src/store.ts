@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type SplitType = 'EQUAL' | 'UNEQUAL' | 'ON_BEHALF';
+// 🚨 NEW: Added 'SELECTIVE_EQUAL' to the allowed types
+export type SplitType = 'EQUAL' | 'UNEQUAL' | 'ON_BEHALF' | 'SELECTIVE_EQUAL';
 export type Theme = 'light' | 'dark' | 'system';
 
 export interface SplitItem { memberId: string; amount: number; }
@@ -9,7 +10,7 @@ export interface Expense {
   id: string; description: string; amount: number; paidBy: string; 
   date: string; splitType: SplitType; splits: SplitItem[]; isSettled?: boolean;
   updatedAt?: number; 
-  isSystemRepayment?: boolean; // 🚨 NEW: Flags system-generated partial settlements
+  isSystemRepayment?: boolean; 
 }
 export interface Member { id: string; name: string; }
 export interface Group {
@@ -37,10 +38,7 @@ export interface AppState {
   deleteExpense: (groupId: string, expenseId: string) => void;
   editExpense: (groupId: string, expenseId: string, updatedData: Omit<Expense, 'id' | 'date' | 'updatedAt'>) => void;
   settleAllExpenses: (groupId: string) => void;
-  
-  // 🚨 NEW: Action to inject partial settlements
   recordRepayments: (groupId: string, repayments: Omit<Expense, 'id' | 'date' | 'updatedAt'>[]) => void;
-
   addMember: (groupId: string, name: string) => void;
   removeMember: (groupId: string, memberId: string) => void;
 }
@@ -66,7 +64,6 @@ export const useStore = create<AppState>()(
       deleteGroup: (id) => set((state) => ({ groups: state.groups.filter((g) => g.id !== id), deletedGroups: [...state.deletedGroups, { id, deletedAt: Date.now() }] })),
       togglePinGroup: (id) => set((state) => ({ groups: state.groups.map((g) => g.id === id ? { ...g, isPinned: !g.isPinned, updatedAt: Date.now() } : g) })),
       renameGroup: (id, newName) => set((state) => ({ groups: state.groups.map((g) => g.id === id ? { ...g, name: newName, updatedAt: Date.now() } : g) })),
-      
       addExpense: (groupId, newExpenseData) => set((state) => ({
         groups: state.groups.map((group) => {
           if (group.id !== groupId) return group;
@@ -90,8 +87,6 @@ export const useStore = create<AppState>()(
           return { ...g, updatedAt: Date.now(), expenses: g.expenses.map((e) => ({ ...e, isSettled: true, updatedAt: Date.now() })) };
         })
       })),
-
-      // 🚨 NEW IMPLEMENTATION
       recordRepayments: (groupId, repayments) => set((state) => ({
         groups: state.groups.map((g) => {
           if (g.id !== groupId) return g;
@@ -101,7 +96,6 @@ export const useStore = create<AppState>()(
           return { ...g, updatedAt: Date.now(), expenses: [...newExpenses, ...g.expenses] };
         })
       })),
-
       addMember: (groupId, name) => set((state) => ({
         groups: state.groups.map((g) => g.id === groupId ? { ...g, updatedAt: Date.now(), members: [...g.members, { id: crypto.randomUUID(), name }] } : g)
       })),
