@@ -30,13 +30,15 @@ export function useLiveSync(group: Group) {
             }
           });
 
+          // 🚨 FIX: We now accept updates if the cloud timestamp is greater than OR EQUAL to local.
+          // This forces a UI refresh if the array sizes change (like a new member) even if the timestamp fired in the exact same millisecond.
           const newUpdateTime = data.updatedAt || Date.now();
-          if (newUpdateTime > (group.updatedAt || 0)) {
+          if (newUpdateTime >= (group.updatedAt || 0) || data.members.length !== group.members.length) {
             const updatedGroup: Group = {
               ...group,
               name: data.name,
               members: data.members,
-              roles: data.roles, //  NEW: Stream RBAC Roles
+              roles: data.roles,
               expenses: liveExpenses,
               updatedAt: newUpdateTime
             };
@@ -55,7 +57,14 @@ export function useLiveSync(group: Group) {
 export function GlobalLiveSyncManager() {
   const groups = useStore(state => state.groups);
   const liveGroups = groups.filter(g => g.isCollaborative);
-  return <>{liveGroups.map(group => <LiveTripWatcher key={group.id} group={group} />)}</>;
+
+  return (
+    <>
+      {liveGroups.map(group => (
+        <LiveTripWatcher key={group.id} group={group} />
+      ))}
+    </>
+  );
 }
 
 function LiveTripWatcher({ group }: { group: Group }) {

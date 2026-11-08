@@ -50,16 +50,18 @@ export default function JoinTrip() {
     try {
       setJoining(true);
       
-      // 🚨 NEW: Add the new user's Email and Name to the Firestore Members List!
       const tripRef = doc(db, 'trips', tripId);
       const newMember = { id: crypto.randomUUID(), name: cloudUser.name, email: cloudUser.email };
       
+      // 🚨 FIX: Force update the timestamp so the Admin's WebSocket fires!
+      const timeNow = Date.now();
+      
       await updateDoc(tripRef, {
-        members: arrayUnion(newMember), // Atomically pushes to array
-        'roles.viewer': arrayUnion(cloudUser.email) // RBAC: Add as viewer/editor by default
+        members: arrayUnion(newMember),
+        'roles.viewer': arrayUnion(cloudUser.email),
+        updatedAt: timeNow // <-- The crucial ping!
       });
       
-      // Fetch Expenses
       const expensesRef = collection(db, `trips/${tripId}/expenses`);
       const expensesSnap = await getDocs(expensesRef);
       const liveExpenses: Expense[] = [];
@@ -67,9 +69,9 @@ export default function JoinTrip() {
 
       const newGroup: Group = {
         id: crypto.randomUUID(), name: tripPreview.name, createdAt: tripPreview.createdAt,
-        members: [...tripPreview.rawMembers, newMember], // Include themselves!
+        members: [...tripPreview.rawMembers, newMember], 
         expenses: liveExpenses, isCollaborative: true, firebaseTripId: tripId,
-        collabExpiresAt: tripPreview.expiresAt, updatedAt: Date.now()
+        collabExpiresAt: tripPreview.expiresAt, updatedAt: timeNow
       };
 
       importGroup(newGroup);
@@ -104,7 +106,7 @@ export default function JoinTrip() {
         {!cloudUser ? (
           <div className="bg-orange-50 text-orange-700 p-4 rounded-xl text-sm font-medium mb-4">Connect Google Account in sidebar to join.</div>
         ) : (
-          <button onClick={handleJoin} disabled={joining} className="w-full bg-accent-500 hover:bg-accent-600 text-white font-bold text-lg py-4 rounded-xl shadow-md active:scale-95 transition-all mb-4">
+          <button onClick={handleJoin} disabled={joining} className="w-full bg-accent-500 hover:bg-accent-600 text-white font-bold text-lg py-4 rounded-xl shadow-md active:scale-95 transition-all mb-4 flex items-center justify-center gap-2">
             {joining ? "Joining..." : `Join as ${cloudUser.name}`}
           </button>
         )}
