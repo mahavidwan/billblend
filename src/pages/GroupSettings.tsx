@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { exportGroupToJSON } from '../utils/export';
 import { createLiveTripInFirestore } from '../utils/collabSync';
-import { cloudBulkUpdateExpenses, cloudUpdateGroup, cloudEndCollaboration } from '../utils/firestoreActions'; // 🚨 NEW
+import { cloudBulkUpdateExpenses, cloudUpdateGroup, cloudEndCollaboration } from '../utils/firestoreActions';
 import { ArrowLeft, UserPlus, Trash2, FileJson, Edit2, Check, PenLine, Globe, Zap, Link as LinkIcon, Clock, Merge, Lock, ShieldCheck, ServerOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -18,7 +18,7 @@ export default function GroupSettings() {
   const removeMember = useStore(state => state.removeMember);
   const renameGroup = useStore(state => state.renameGroup);
   const enableCollaboration = useStore(state => state.enableCollaboration);
-  const endCollaboration = useStore(state => state.endCollaboration); // 🚨 NEW
+  const endCollaboration = useStore(state => state.endCollaboration);
   const mergeMembers = useStore(state => state.mergeMembers); 
   const changeUserRole = useStore(state => state.changeUserRole);
 
@@ -37,7 +37,6 @@ export default function GroupSettings() {
 
   if (!group) return null;
 
-  // 🚨 SECURITY: Is Current User an Admin?
   const isAdmin = !group.isCollaborative || (cloudUser?.email && group.roles?.admin?.includes(cloudUser.email));
 
   const handleRename = async () => {
@@ -80,25 +79,20 @@ export default function GroupSettings() {
       try {
         setIsEnablingCollab(true);
         const { firebaseTripId, expiresAt } = await createLiveTripInFirestore(group, collabDuration, cloudUser.email);
-        
-        // 🚨 This now safely auto-injects the user into the member list if they were missing!
         enableCollaboration(group.id, firebaseTripId, expiresAt, cloudUser.email);
         
-        // Because the member list might have changed (auto-injected), we MUST push the updated member list to Firestore instantly.
         const updatedGroup = useStore.getState().groups.find(g => g.id === group.id);
         if (updatedGroup) await cloudUpdateGroup(firebaseTripId, { members: updatedGroup.members, roles: updatedGroup.roles });
-
       } catch (err) { alert("Failed to create live trip. Check internet connection."); } 
       finally { setIsEnablingCollab(false); }
     }
   };
 
-  // 🚨 NEW: End Collaboration Escape Hatch
   const handleEndCollab = async () => {
     if (!isAdmin) return;
     if (window.confirm("CRITICAL WARNING:\n\nAre you sure you want to permanently end Live Collaboration?\n\nThis will instantly delete the trip from the cloud. Other users will lose access. Your local copy will be safely retained.")) {
       try {
-        setIsEnablingCollab(true); // Re-use loading state
+        setIsEnablingCollab(true); 
         if (group.firebaseTripId) await cloudEndCollaboration(group.firebaseTripId);
         endCollaboration(group.id);
         alert("Collaboration ended. Trip is now local-only.");
@@ -200,9 +194,14 @@ export default function GroupSettings() {
             </h3>
             {group.isCollaborative && <span className="bg-accent-500 text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider animate-pulse shadow-md">Live</span>}
           </div>
-          <p className={`text-xs mb-4 ${group.isCollaborative ? 'text-brand-100' : 'text-slate-500 dark:text-slate-400'}`}>
-            {group.isCollaborative ? `This trip is live! Friends can join via link. Auto-closes on ${new Date(group.collabExpiresAt || 0).toLocaleDateString()}.` : "Upgrade this trip to allow friends to add expenses live from their own phones."}
+          
+          {/* 🚨 UPDATED UX COPY */}
+          <p className={`text-xs mb-4 leading-relaxed ${group.isCollaborative ? 'text-brand-100' : 'text-slate-500 dark:text-slate-400'}`}>
+            {group.isCollaborative 
+              ? `This trip is live! Friends can join via link. Auto-closes on ${new Date(group.collabExpiresAt || 0).toLocaleDateString()}.` 
+              : "Enable this to allow friends to add expenses live from their own phones. Select an initial time-span for which you want Real-Time sync to remain enabled on this trip. Later you can extend this time! After this time, the trip details still remain safely saved on your local device and Google Drive."}
           </p>
+
           {!group.isCollaborative ? (
             <div className="space-y-3">
               <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-950 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
@@ -211,6 +210,8 @@ export default function GroupSettings() {
                   <option value={7}>Active for 7 Days</option>
                   <option value={15}>Active for 15 Days</option>
                   <option value={30}>Active for 30 Days</option>
+                  {/* 🚨 ADDED 45 DAYS */}
+                  <option value={45}>Active for 45 Days</option> 
                 </select>
               </div>
               <button onClick={handleTurnOnCollab} disabled={isEnablingCollab} className="w-full bg-slate-800 dark:bg-brand-600 hover:bg-slate-700 text-white font-bold py-3 rounded-xl shadow-md transition-all active:scale-95 flex justify-center items-center gap-2">
