@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
-// 🚨 NEW: Imported useLocation for analytics tracking
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { WalletCards, Sun, Moon, Monitor, User } from 'lucide-react';
 import { useStore } from './store';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { triggerGlobalSync } from './utils/cloudSync';
-// 🚨 NEW: Google Analytics Package
+import { GlobalLiveSyncManager } from './utils/useLiveSync'; // 🚨 NEW
 import ReactGA from "react-ga4";
 
 import Dashboard from './pages/Dashboard';
@@ -16,41 +15,29 @@ import ImportGroup from './pages/ImportGroup';
 import GroupSettings from './pages/GroupSettings';
 import Guide from './pages/Guide';
 import Sidebar from './components/Sidebar';
+import JoinTrip from './pages/JoinTrip';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-// 🚨 NEW: Securely pull the GA4 ID
 const GA_MEASUREMENT_ID = import.meta.env.VITE_GA_MEASUREMENT_ID;
 
-// Initialize Google Analytics exactly once when the app loads
-if (GA_MEASUREMENT_ID) {
-  ReactGA.initialize(GA_MEASUREMENT_ID);
-}
+if (GA_MEASUREMENT_ID) ReactGA.initialize(GA_MEASUREMENT_ID);
 
-// --- GOOGLE ANALYTICS ROUTE TRACKER ---
 function RouteTracker() {
   const location = useLocation();
-
   useEffect(() => {
-    // Send a pageview ping to Google every time the user navigates
-    if (GA_MEASUREMENT_ID) {
-      ReactGA.send({ hitType: "pageview", page: location.pathname + location.search });
-    }
+    if (GA_MEASUREMENT_ID) ReactGA.send({ hitType: "pageview", page: location.pathname + location.search });
   }, [location]);
-
   return null;
 }
 
-// --- HYBRID AUTO-SYNC ENGINE ---
 function AutoSyncManager() {
   const cloudUser = useStore(state => state.cloudUser);
-
   useEffect(() => {
     if (!cloudUser) return;
     triggerGlobalSync();
     const intervalId = setInterval(() => { triggerGlobalSync(); }, 2 * 60 * 1000);
     return () => clearInterval(intervalId);
   }, [cloudUser]);
-
   return null;
 }
 
@@ -93,7 +80,8 @@ export default function App() {
       <Router>
         <ThemeManager />
         <AutoSyncManager /> 
-        <RouteTracker /> {/* <-- Silently pings GA4 on page change! */}
+        <GlobalLiveSyncManager /> {/* 🚨 THE GLOBAL WEBSOCKET ENGINE RUNS HERE! */}
+        <RouteTracker /> 
         <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
         <div className="min-h-screen bg-slate-200 dark:bg-black flex justify-center font-sans transition-colors duration-300">
@@ -129,6 +117,7 @@ export default function App() {
                 <Route path="/group/:id/expense/:expenseId/edit" element={<AddExpense />} />
                 <Route path="/import" element={<ImportGroup />} />
                 <Route path="/guide" element={<Guide />} /> 
+                <Route path="/join/:tripId" element={<JoinTrip />} /> 
               </Routes>
             </main>
           </div>

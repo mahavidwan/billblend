@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import type { SplitType, SplitItem } from '../store';
+import { cloudSaveExpense } from '../utils/firestoreActions'; // 🚨 NEW
 import { ArrowLeft, CheckCircle2, AlertCircle, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -12,6 +13,7 @@ export default function AddExpense() {
   const group = useStore((state) => state.groups.find((g) => g.id === id));
   const addExpense = useStore((state) => state.addExpense);
   const editExpense = useStore((state) => state.editExpense);
+  const cloudUser = useStore((state) => state.cloudUser);
 
   const [description, setDescription] = useState('');
   const [amountStr, setAmountStr] = useState('');
@@ -21,6 +23,9 @@ export default function AddExpense() {
   const [unequalSplits, setUnequalSplits] = useState<Record<string, string>>({});
   const [onBehalfOf, setOnBehalfOf] = useState<string>('');
   const [selectedForSplit, setSelectedForSplit] = useState<string[]>([]);
+
+  // 🚨 UI States for Cloud pushing
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (group && expenseId) {
@@ -68,8 +73,9 @@ export default function AddExpense() {
 
   const validationMsg = getValidationMessage();
 
-  const handleSave = () => {
-    if (validationMsg) return;
+  const handleSave = async () => {
+    if (validationMsg || !group) return;
+    setIsSaving(true);
     let splits: SplitItem[] = [];
 
     if (splitType === 'EQUAL') {
@@ -88,20 +94,44 @@ export default function AddExpense() {
       let assignedSoFar = 0;
       
       selectedForSplit.forEach((memberId, idx) => {
-        if (idx === count - 1) {
-          splits.push({ memberId, amount: Math.round((totalAmount - assignedSoFar) * 100) / 100 });
-        } else {
-          splits.push({ memberId, amount: baseSplit });
-          assignedSoFar += baseSplit;
-        }
+        if (idx === count - 1) splits.push({ memberId, amount: Math.round((totalAmount - assignedSoFar) * 100) / 100 });
+        else { splits.push({ memberId, amount: baseSplit }); assignedSoFar += baseSplit; }
       });
     }
 
-    const payload = { description: description.trim(), amount: totalAmount, paidBy, splitType, splits };
+    try {
+      const activeExpenseId = expenseId || crypto.randomUUID();
+      const payload = { 
+        description: description.trim(), 
+        amount: totalAmount, 
+        paidBy, 
+        splitType, 
+        splits 
+      };
 
-    if (expenseId) editExpense(group.id, expenseId, payload);
-    else addExpense(group.id, payload);
-    navigate(`/group/${group.id}`);
+      // 🚨 BRIDGE FIX: If the trip is collaborative, push to Firebase BEFORE local save!
+      if (group.isCollaborative && group.firebaseTripId) {
+        await cloudSaveExpense(group.firebaseTripId, {
+          ...payload,
+          id: activeExpenseId,
+          date: new Date().toISOString(),
+          isSettled: false,
+          updatedAt: Date.now(),
+          createdByEmail: cloudUser?.email || 'unknown' // Audit Trail!
+        });
+      }
+
+      // Update Local State
+      if (expenseId) editExpense(group.id, expenseId, payload);
+      else addExpense(group.id, payload, cloudUser?.email);
+      
+      navigate(`/group/${group.id}`);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save to cloud. Check internet connection.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -125,9 +155,7 @@ export default function AddExpense() {
           <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-3 transition-colors">Who paid?</label>
           <div className="flex flex-wrap gap-2">
             {group.members.map(member => (
-              <button key={member.id} onClick={() => setPaidBy(member.id)} className={`px-4 py-2 rounded-full font-semibold text-sm transition-all ${paidBy === member.id ? 'bg-brand-600 dark:bg-brand-500/20 text-white dark:text-brand-400 dark:border-brand-500/50 shadow-md dark:shadow-none border border-transparent' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
-                {member.name}
-              </button>
+              <button key={member.id} onClick={() => setPaidBy(member.id)} className={`px-4 py-2 rounded-full font-semibold text-sm transition-all ${paidBy === member.id ? 'bg-brand-600 dark:bg-brand-500/20 text-white dark:text-brand-400 dark:border-brand-500/50 shadow-md dark:shadow-none border border-transparent' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>{member.name}</button>
             ))}
           </div>
         </div>
@@ -144,7 +172,6 @@ export default function AddExpense() {
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 transition-colors duration-300">
-          
           {splitType === 'EQUAL' && (
             <div className="text-center py-4">
               <div className="text-3xl font-bold text-brand-600 dark:text-brand-400 mb-1 transition-colors">₹{totalAmount > 0 ? (totalAmount / group.members.length).toFixed(2) : '0.00'}</div>
@@ -155,37 +182,20 @@ export default function AddExpense() {
           {splitType === 'SELECTIVE_EQUAL' && (
             <div className="space-y-4">
               <div className="text-center py-2">
-                <div className="text-3xl font-bold text-brand-600 dark:text-brand-400 mb-1 transition-colors">
-                  ₹{selectedForSplit.length > 0 ? (totalAmount / selectedForSplit.length).toFixed(2) : '0.00'}
-                </div>
+                <div className="text-3xl font-bold text-brand-600 dark:text-brand-400 mb-1 transition-colors">₹{selectedForSplit.length > 0 ? (totalAmount / selectedForSplit.length).toFixed(2) : '0.00'}</div>
                 <p className="text-xs font-medium text-slate-500 dark:text-slate-500 transition-colors">per selected person ({selectedForSplit.length} selected)</p>
               </div>
-              
               <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                {/* 🚨 NEW: Select All / Deselect All Toggle */}
                 <div className="flex justify-between items-center mb-2 px-1">
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Who shares this cost?</p>
-                  <button 
-                    onClick={() => {
-                      if (selectedForSplit.length === group.members.length) setSelectedForSplit([]);
-                      else setSelectedForSplit(group.members.map(m => m.id));
-                    }} 
-                    className="text-xs font-bold text-brand-600 dark:text-brand-400 hover:underline"
-                  >
+                  <button onClick={() => { if (selectedForSplit.length === group.members.length) setSelectedForSplit([]); else setSelectedForSplit(group.members.map(m => m.id)); }} className="text-xs font-bold text-brand-600 dark:text-brand-400 hover:underline">
                     {selectedForSplit.length === group.members.length ? 'Deselect All' : 'Select All'}
                   </button>
                 </div>
-
                 {group.members.map(member => {
                   const isSelected = selectedForSplit.includes(member.id);
                   return (
-                    <div key={member.id} 
-                      onClick={() => {
-                        if (isSelected) setSelectedForSplit(selectedForSplit.filter(id => id !== member.id));
-                        else setSelectedForSplit([...selectedForSplit, member.id]);
-                      }}
-                      className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-colors border ${isSelected ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-800' : 'bg-slate-50 dark:bg-slate-900 border-slate-100 dark:border-slate-800 opacity-70'}`}
-                    >
+                    <div key={member.id} onClick={() => { if (isSelected) setSelectedForSplit(selectedForSplit.filter(id => id !== member.id)); else setSelectedForSplit([...selectedForSplit, member.id]); }} className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-colors border ${isSelected ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-800' : 'bg-slate-50 dark:bg-slate-900 border-slate-100 dark:border-slate-800 opacity-70'}`}>
                       <div className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors ${isSelected ? 'bg-brand-500 border-brand-500 text-white' : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600'}`}>
                         {isSelected && <Check className="w-3.5 h-3.5" />}
                       </div>
@@ -240,8 +250,8 @@ export default function AddExpense() {
               </motion.div>
             )}
           </AnimatePresence>
-          <button onClick={handleSave} disabled={!!validationMsg} className="w-full bg-accent-500 dark:bg-accent-600 disabled:bg-slate-300 dark:disabled:bg-slate-800 hover:bg-accent-600 dark:hover:bg-accent-500 text-white disabled:text-slate-500 font-bold text-lg py-4 rounded-xl shadow-lg dark:shadow-none active:scale-[0.98] transition-all flex justify-center items-center gap-2">
-            <CheckCircle2 className="w-6 h-6" /> {expenseId ? 'Update Expense' : 'Save Expense'}
+          <button onClick={handleSave} disabled={!!validationMsg || isSaving} className="w-full bg-accent-500 dark:bg-accent-600 disabled:bg-slate-300 dark:disabled:bg-slate-800 hover:bg-accent-600 dark:hover:bg-accent-500 text-white disabled:text-slate-500 font-bold text-lg py-4 rounded-xl shadow-lg dark:shadow-none active:scale-[0.98] transition-all flex justify-center items-center gap-2">
+            <CheckCircle2 className="w-6 h-6" /> {isSaving ? 'Syncing...' : (expenseId ? 'Update Expense' : 'Save Expense')}
           </button>
         </div>
       </div>

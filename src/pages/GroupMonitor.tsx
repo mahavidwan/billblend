@@ -5,7 +5,7 @@ import { exportGroupToCSV, exportGroupToJSON } from '../utils/export';
 import { ArrowLeft, Share2, Check, Settings, Download, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// Import our beautiful new modular tabs!
+// 🚨 Properly importing your modular tabs!
 import ExpensesTab from '../components/GroupTabs/ExpensesTab';
 import BalancesTab from '../components/GroupTabs/BalancesTab';
 import SettleTab from '../components/GroupTabs/SettleTab';
@@ -18,10 +18,17 @@ export default function GroupMonitor() {
   const navigate = useNavigate();
   
   const group = useStore(state => state.groups.find(g => g.id === id));
+  const cloudUser = useStore(state => state.cloudUser); // Need this for RBAC
+  
   const [activeTab, setActiveTab] = useState<Tab>('EXPENSES');
   const [copied, setCopied] = useState(false);
 
   if (!group) return <div className="p-8 text-center dark:text-slate-200"><h2 className="text-xl font-bold">Group not found</h2><button onClick={() => navigate('/')}>Go back</button></div>;
+
+  // 🚨 RBAC: Determine if the user is allowed to add expenses
+  const isAdmin = !group.isCollaborative || (cloudUser?.email && group.roles?.admin?.includes(cloudUser.email));
+  const isEditor = group.isCollaborative && cloudUser?.email && group.roles?.editor?.includes(cloudUser.email);
+  const canAddExpense = !group.isCollaborative || isAdmin || isEditor; // Viewers are false
 
   const handleShare = async () => { 
     const encodedData = btoa(encodeURIComponent(JSON.stringify(group)));
@@ -33,7 +40,6 @@ export default function GroupMonitor() {
     try { await navigator.clipboard.writeText(shareUrl); setCopied(true); setTimeout(() => setCopied(false), 3000); } catch { alert("Failed to copy link."); }
   };
 
-  // Header Metrics
   const activeExpensesAll = group.expenses.filter(e => !e.isSettled);
   const totalSpent = activeExpensesAll.reduce((sum, exp) => exp.isSystemRepayment ? sum : sum + exp.amount, 0);
   const isFullySettled = activeExpensesAll.length === 0 && group.expenses.length > 0;
@@ -41,7 +47,7 @@ export default function GroupMonitor() {
   return (
     <div className="flex flex-col h-full transition-colors duration-300 pb-24 print:pb-0 print:bg-white">
       
-      {/* 🚨 PRINT-ONLY INVOICE HEADER */}
+      {/* PRINT-ONLY INVOICE HEADER */}
       <div className="hidden print:block p-8 border-b-2 border-slate-200 mb-6">
         <h1 className="text-4xl font-bold text-slate-900 mb-2">BillBlend Trip Report</h1>
         <h2 className="text-2xl font-semibold text-brand-700">{group.name}</h2>
@@ -80,9 +86,12 @@ export default function GroupMonitor() {
         </AnimatePresence>
       </div>
 
-      <button onClick={() => navigate(`/group/${group.id}/add`)} className="fixed bottom-6 right-1/2 translate-x-[9rem] sm:translate-x-[11rem] bg-accent-500 dark:bg-accent-600 text-white p-4 rounded-full shadow-lg dark:shadow-none hover:bg-accent-600 dark:hover:bg-accent-500 active:scale-90 transition-all z-20 print:hidden">
-        <Plus className="w-6 h-6" />
-      </button>
+      {/* 🚨 RBAC ENFORCED FAB BUTTON */}
+      {canAddExpense && (
+        <button onClick={() => navigate(`/group/${group.id}/add`)} className="fixed bottom-6 right-1/2 translate-x-[9rem] sm:translate-x-[11rem] bg-accent-500 dark:bg-accent-600 text-white p-4 rounded-full shadow-lg dark:shadow-none hover:bg-accent-600 dark:hover:bg-accent-500 active:scale-90 transition-all z-20 print:hidden">
+          <Plus className="w-6 h-6" />
+        </button>
+      )}
     </div>
   );
 }

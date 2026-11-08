@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-// 🚨 NEW: Added 'SELECTIVE_EQUAL' to the allowed types
 export type SplitType = 'EQUAL' | 'UNEQUAL' | 'ON_BEHALF' | 'SELECTIVE_EQUAL';
 export type Theme = 'light' | 'dark' | 'system';
 
@@ -9,15 +8,15 @@ export interface SplitItem { memberId: string; amount: number; }
 export interface Expense {
   id: string; description: string; amount: number; paidBy: string; 
   date: string; splitType: SplitType; splits: SplitItem[]; isSettled?: boolean;
-  updatedAt?: number; 
-  isSystemRepayment?: boolean; 
+  updatedAt?: number; isSystemRepayment?: boolean; createdByEmail?: string;
 }
-export interface Member { id: string; name: string; }
+export interface Member { id: string; name: string; email?: string; }
+export interface GroupRoles { admin: string[]; editor: string[]; viewer: string[]; }
 export interface Group {
   id: string; name: string; createdAt: string; isPinned?: boolean; members: Member[]; expenses: Expense[];
-  updatedAt?: number; 
+  updatedAt?: number; isCollaborative?: boolean; firebaseTripId?: string; collabExpiresAt?: number; 
+  roles?: GroupRoles; 
 }
-
 export interface CloudUser { name: string; email: string; picture: string; accessToken: string; tokenExpiry: number; }
 export interface Tombstone { id: string; deletedAt: number; }
 
@@ -27,6 +26,7 @@ export interface AppState {
   
   setTheme: (theme: Theme) => void;
   setCloudUser: (user: CloudUser | null) => void;
+  updateGroupFromCloud: (groupId: string, updatedGroup: Group) => void;
   syncMergeData: (groups: Group[], deletedGroups: Tombstone[], deletedExpenses: Tombstone[], syncTime: string) => void;
   createGroup: (name: string, members: string[]) => string;
   setActiveGroup: (id: string | null) => void;
@@ -34,22 +34,48 @@ export interface AppState {
   deleteGroup: (id: string) => void;
   togglePinGroup: (id: string) => void;
   renameGroup: (id: string, newName: string) => void;
-  addExpense: (groupId: string, expense: Omit<Expense, 'id' | 'date' | 'updatedAt'>) => void;
+  
+  // 🚨 FIXED: Now accepts adminEmail to prevent the lockout bug!
+  enableCollaboration: (groupId: string, firebaseTripId: string, expiresAt: number, adminEmail: string) => void;
+
+  // Action to End Collaboration Mode in a trip
+  endCollaboration: (groupId: string) => void;
+  
+  // 🚨 NEW: Role Management Action
+  changeUserRole: (groupId: string, targetEmail: string, newRole: 'admin' | 'editor' | 'viewer') => void;
+
+  addExpense: (groupId: string, expense: Omit<Expense, 'id' | 'date' | 'updatedAt' | 'createdByEmail'>, creatorEmail?: string) => void;
   deleteExpense: (groupId: string, expenseId: string) => void;
   editExpense: (groupId: string, expenseId: string, updatedData: Omit<Expense, 'id' | 'date' | 'updatedAt'>) => void;
   settleAllExpenses: (groupId: string) => void;
-  recordRepayments: (groupId: string, repayments: Omit<Expense, 'id' | 'date' | 'updatedAt'>[]) => void;
-  addMember: (groupId: string, name: string) => void;
+  recordRepayments: (groupId: string, repayments: Omit<Expense, 'id' | 'date' | 'updatedAt' | 'createdByEmail'>[]) => void;
+  addMember: (groupId: string, name: string, email?: string) => void;
   removeMember: (groupId: string, memberId: string) => void;
+  mergeMembers: (groupId: string, ghostId: string, targetId: string) => void; 
 }
 
 export const useStore = create<AppState>()(
   persist(
     (set) => ({
       theme: 'system', groups: [], activeGroupId: null, cloudUser: null, lastSyncTime: null, deletedGroups: [], deletedExpenses: [],
-      setTheme: (theme) => set({ theme }),
-      setCloudUser: (cloudUser) => set({ cloudUser }),
-      syncMergeData: (groups, deletedGroups, deletedExpenses, lastSyncTime) => set({ groups, deletedGroups, deletedExpenses, lastSyncTime }),
+      setTheme: (theme) => set({ theme }), setCloudUser: (cloudUser) => set({ cloudUser }),
+      updateGroupFromCloud: (groupId, updatedGroup) => set((state) => ({ groups: state.groups.map(g => g.id === groupId ? { ...updatedGroup, updatedAt: Date.now() } : g) })),
+      syncMergeData: (cloudGroups, cloudDelGroups, cloudDelExpenses, lastSyncTime) => set((state) => {
+        const newGroupsMap = new Map(cloudGroups.map(g => [g.id, g]));
+        state.groups.forEach(localG => {
+          const cloudG = newGroupsMap.get(localG.id);
+          if (!cloudG || (localG.updatedAt || 0) > (cloudG?.updatedAt || 0)) newGroupsMap.set(localG.id, localG);
+        });
+        const mergeTombstones = (local: Tombstone[], cloud: Tombstone[]) => {
+          const map = new Map(cloud.map(t => [t.id, t]));
+          local.forEach(t => {
+            const existing = map.get(t.id);
+            if (!existing || t.deletedAt > existing.deletedAt) map.set(t.id, t);
+          });
+          return Array.from(map.values());
+        };
+        return { groups: Array.from(newGroupsMap.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), deletedGroups: mergeTombstones(state.deletedGroups, cloudDelGroups), deletedExpenses: mergeTombstones(state.deletedExpenses, cloudDelExpenses), lastSyncTime };
+      }),
       createGroup: (name, memberNames) => {
         const newGroup: Group = { id: crypto.randomUUID(), name, createdAt: new Date().toISOString(), isPinned: false, updatedAt: Date.now(), members: memberNames.map((n) => ({ id: crypto.randomUUID(), name: n })), expenses: [] };
         set((state) => ({ groups: [newGroup, ...state.groups] })); return newGroup.id;
@@ -57,51 +83,79 @@ export const useStore = create<AppState>()(
       setActiveGroup: (id) => set({ activeGroupId: id }),
       importGroup: (importedGroup) => set((state) => {
         importedGroup.updatedAt = Date.now();
-        const exists = state.groups.some(g => g.id === importedGroup.id);
-        if (exists) return { groups: state.groups.map(g => g.id === importedGroup.id ? importedGroup : g) };
+        const existsIdx = state.groups.findIndex(g => g.id === importedGroup.id || (importedGroup.firebaseTripId && g.firebaseTripId === importedGroup.firebaseTripId));
+        if (existsIdx >= 0) { const newGroups = [...state.groups]; newGroups[existsIdx] = importedGroup; return { groups: newGroups }; }
         return { groups: [importedGroup, ...state.groups] };
       }),
       deleteGroup: (id) => set((state) => ({ groups: state.groups.filter((g) => g.id !== id), deletedGroups: [...state.deletedGroups, { id, deletedAt: Date.now() }] })),
       togglePinGroup: (id) => set((state) => ({ groups: state.groups.map((g) => g.id === id ? { ...g, isPinned: !g.isPinned, updatedAt: Date.now() } : g) })),
       renameGroup: (id, newName) => set((state) => ({ groups: state.groups.map((g) => g.id === id ? { ...g, name: newName, updatedAt: Date.now() } : g) })),
-      addExpense: (groupId, newExpenseData) => set((state) => ({
-        groups: state.groups.map((group) => {
-          if (group.id !== groupId) return group;
-          const newExpense: Expense = { ...newExpenseData, id: crypto.randomUUID(), date: new Date().toISOString(), isSettled: false, updatedAt: Date.now() };
-          return { ...group, updatedAt: Date.now(), expenses: [newExpense, ...group.expenses] };
-        }),
-      })),
-      deleteExpense: (groupId, expenseId) => set((state) => ({
-        groups: state.groups.map((g) => g.id === groupId ? { ...g, updatedAt: Date.now(), expenses: g.expenses.filter((e) => e.id !== expenseId) } : g),
-        deletedExpenses: [...state.deletedExpenses, { id: expenseId, deletedAt: Date.now() }]
-      })),
-      editExpense: (groupId, expenseId, updatedData) => set((state) => ({
+      
+      // 🚨 FIX: Self-Healing Admin Injection
+      enableCollaboration: (groupId, firebaseTripId, expiresAt, adminEmail) => set((state) => {
+        const cloudUser = state.cloudUser;
+        return {
+          groups: state.groups.map((g) => {
+            if (g.id !== groupId) return g;
+            
+            // SECURITY CHECK: Is the admin's email actually in the members list?
+            let updatedMembers = [...g.members];
+            const isMember = updatedMembers.some(m => m.email === adminEmail);
+            
+            if (!isMember && cloudUser) {
+              // Auto-inject the Admin into the group so they aren't locked out!
+              updatedMembers.push({
+                id: crypto.randomUUID(),
+                name: cloudUser.name,
+                email: adminEmail
+              });
+            }
+
+            return { 
+              ...g, 
+              members: updatedMembers, // 🚨 Saved the healed members list
+              isCollaborative: true, 
+              firebaseTripId, 
+              collabExpiresAt: expiresAt, 
+              updatedAt: Date.now(),
+              roles: { admin: [adminEmail], editor: [], viewer: [] }
+            };
+          }) 
+        };
+      }),
+
+      // 🚨 NEW: Reverts a trip to offline-mode
+      endCollaboration: (groupId) => set((state) => ({
         groups: state.groups.map((g) => {
           if (g.id !== groupId) return g;
-          return { ...g, updatedAt: Date.now(), expenses: g.expenses.map((e) => e.id === expenseId ? { ...e, ...updatedData, updatedAt: Date.now() } : e) };
+          // Strip away all cloud properties
+          const { isCollaborative, firebaseTripId, collabExpiresAt, roles, ...offlineGroup } = g;
+          return { ...offlineGroup, updatedAt: Date.now() };
         })
       })),
-      settleAllExpenses: (groupId) => set((state) => ({
-        groups: state.groups.map((g) => {
-          if (g.id !== groupId) return g;
-          return { ...g, updatedAt: Date.now(), expenses: g.expenses.map((e) => ({ ...e, isSettled: true, updatedAt: Date.now() })) };
+
+      // 🚨 NEW: Changes user roles locally
+      changeUserRole: (groupId, targetEmail, newRole) => set((state) => ({
+        groups: state.groups.map(group => {
+          if (group.id !== groupId || !group.roles) return group;
+          const newRoles = {
+            admin: group.roles.admin.filter(e => e !== targetEmail),
+            editor: group.roles.editor?.filter(e => e !== targetEmail) || [],
+            viewer: group.roles.viewer?.filter(e => e !== targetEmail) || [],
+          };
+          newRoles[newRole].push(targetEmail);
+          return { ...group, roles: newRoles, updatedAt: Date.now() };
         })
       })),
-      recordRepayments: (groupId, repayments) => set((state) => ({
-        groups: state.groups.map((g) => {
-          if (g.id !== groupId) return g;
-          const newExpenses = repayments.map(r => ({
-            ...r, id: crypto.randomUUID(), date: new Date().toISOString(), isSettled: false, updatedAt: Date.now()
-          }));
-          return { ...g, updatedAt: Date.now(), expenses: [...newExpenses, ...g.expenses] };
-        })
-      })),
-      addMember: (groupId, name) => set((state) => ({
-        groups: state.groups.map((g) => g.id === groupId ? { ...g, updatedAt: Date.now(), members: [...g.members, { id: crypto.randomUUID(), name }] } : g)
-      })),
-      removeMember: (groupId, memberId) => set((state) => ({
-        groups: state.groups.map((g) => g.id === groupId ? { ...g, updatedAt: Date.now(), members: g.members.filter((m) => m.id !== memberId) } : g)
-      })),
+
+      addExpense: (groupId, newExpenseData, creatorEmail) => set((state) => ({ groups: state.groups.map((group) => { if (group.id !== groupId) return group; const newExpense: Expense = { ...newExpenseData, id: crypto.randomUUID(), date: new Date().toISOString(), isSettled: false, updatedAt: Date.now(), createdByEmail: creatorEmail }; return { ...group, updatedAt: Date.now(), expenses: [newExpense, ...group.expenses] }; }), })),
+      deleteExpense: (groupId, expenseId) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, updatedAt: Date.now(), expenses: g.expenses.filter((e) => e.id !== expenseId) } : g), deletedExpenses: [...state.deletedExpenses, { id: expenseId, deletedAt: Date.now() }] })),
+      editExpense: (groupId, expenseId, updatedData) => set((state) => ({ groups: state.groups.map((g) => { if (g.id !== groupId) return g; return { ...g, updatedAt: Date.now(), expenses: g.expenses.map((e) => e.id === expenseId ? { ...e, ...updatedData, updatedAt: Date.now() } : e) }; }) })),
+      settleAllExpenses: (groupId) => set((state) => ({ groups: state.groups.map((g) => { if (g.id !== groupId) return g; return { ...g, updatedAt: Date.now(), expenses: g.expenses.map((e) => ({ ...e, isSettled: true, updatedAt: Date.now() })) }; }) })),
+      recordRepayments: (groupId, repayments) => set((state) => ({ groups: state.groups.map((g) => { if (g.id !== groupId) return g; const newExpenses = repayments.map(r => ({ ...r, id: crypto.randomUUID(), date: new Date().toISOString(), isSettled: false, updatedAt: Date.now() })); return { ...g, updatedAt: Date.now(), expenses: [...newExpenses, ...g.expenses] }; }) })),
+      addMember: (groupId, name, email) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, updatedAt: Date.now(), members: [...g.members, { id: crypto.randomUUID(), name, email }] } : g) })),
+      removeMember: (groupId, memberId) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, updatedAt: Date.now(), members: g.members.filter((m) => m.id !== memberId) } : g) })),
+      mergeMembers: (groupId, ghostId, targetId) => set((state) => ({ groups: state.groups.map(group => { if (group.id !== groupId) return group; const updatedExpenses = group.expenses.map(exp => { let isModified = false; let newPaidBy = exp.paidBy; if (newPaidBy === ghostId) { newPaidBy = targetId; isModified = true; } let newSplits = [...exp.splits]; const ghostSplitIdx = newSplits.findIndex(s => s.memberId === ghostId); if (ghostSplitIdx !== -1) { isModified = true; const ghostAmount = newSplits[ghostSplitIdx].amount; newSplits.splice(ghostSplitIdx, 1); const targetSplitIdx = newSplits.findIndex(s => s.memberId === targetId); if (targetSplitIdx !== -1) newSplits[targetSplitIdx].amount += ghostAmount; else newSplits.push({ memberId: targetId, amount: ghostAmount }); } if (isModified) return { ...exp, paidBy: newPaidBy, splits: newSplits, updatedAt: Date.now() }; return exp; }); const updatedMembers = group.members.filter(m => m.id !== ghostId); return { ...group, members: updatedMembers, expenses: updatedExpenses, updatedAt: Date.now() }; }) })),
     }),
     { name: 'billblend-storage' }
   )
