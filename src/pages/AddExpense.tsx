@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useStore } from '../store';
+import { useStore, VIRTUAL_FUND_ID } from '../store';
 import type { SplitType, SplitItem } from '../store';
-import { cloudSaveExpense } from '../utils/firestoreActions'; // 🚨 NEW
-import { ArrowLeft, CheckCircle2, AlertCircle, Check } from 'lucide-react';
+import { cloudSaveExpense } from '../utils/firestoreActions'; 
+import { ArrowLeft, CheckCircle2, AlertCircle, Check, Landmark, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function AddExpense() {
@@ -23,9 +23,21 @@ export default function AddExpense() {
   const [unequalSplits, setUnequalSplits] = useState<Record<string, string>>({});
   const [onBehalfOf, setOnBehalfOf] = useState<string>('');
   const [selectedForSplit, setSelectedForSplit] = useState<string[]>([]);
-
-  // 🚨 UI States for Cloud pushing
   const [isSaving, setIsSaving] = useState(false);
+
+  // 🚨 OVERDRAFT PROTECTION MATH
+  const totalAmount = parseFloat(amountStr) || 0;
+  
+  const currentLiquidity = useMemo(() => {
+    if (!group || !group.isFundEnabled) return 0;
+    const allDeposits = group.expenses.filter(e => e.splitType === 'FUND_DEPOSIT');
+    const fundExpenses = group.expenses.filter(e => e.paidBy === VIRTUAL_FUND_ID && e.id !== expenseId); // Ignore current expense if editing
+    const deposited = allDeposits.reduce((sum, d) => sum + d.amount, 0);
+    const spent = fundExpenses.reduce((sum, e) => sum + e.amount, 0);
+    return deposited - spent;
+  }, [group, expenseId]);
+
+  const hasSufficientFunds = currentLiquidity >= totalAmount;
 
   useEffect(() => {
     if (group && expenseId) {
@@ -54,7 +66,6 @@ export default function AddExpense() {
 
   if (!group) return null;
 
-  const totalAmount = parseFloat(amountStr) || 0;
   const unequalSum = useMemo(() => Object.values(unequalSplits).reduce((sum, val) => sum + (parseFloat(val) || 0), 0), [unequalSplits]);
   const isUnequalBalanced = Math.abs(totalAmount - unequalSum) < 0.01;
   const remainingUnequal = totalAmount - unequalSum;
@@ -62,6 +73,12 @@ export default function AddExpense() {
   const getValidationMessage = () => {
     if (totalAmount <= 0) return "Please enter a valid amount.";
     if (!description.trim()) return "Don't forget to add a description!";
+    
+    // 🚨 Overdraft Validation
+    if (paidBy === VIRTUAL_FUND_ID && !hasSufficientFunds) {
+      return `Trip Fund only has ₹${currentLiquidity.toFixed(0)} left!`;
+    }
+
     if (splitType === 'UNEQUAL' && !isUnequalBalanced) {
       if (remainingUnequal > 0) return `Assign the remaining ₹${remainingUnequal.toFixed(2)}`;
       return `Amounts exceed total by ₹${Math.abs(remainingUnequal).toFixed(2)}`;
@@ -101,33 +118,20 @@ export default function AddExpense() {
 
     try {
       const activeExpenseId = expenseId || crypto.randomUUID();
-      const payload = { 
-        description: description.trim(), 
-        amount: totalAmount, 
-        paidBy, 
-        splitType, 
-        splits 
-      };
+      const payload = { description: description.trim(), amount: totalAmount, paidBy, splitType, splits };
 
-      // 🚨 BRIDGE FIX: If the trip is collaborative, push to Firebase BEFORE local save!
       if (group.isCollaborative && group.firebaseTripId) {
         await cloudSaveExpense(group.firebaseTripId, {
-          ...payload,
-          id: activeExpenseId,
-          date: new Date().toISOString(),
-          isSettled: false,
-          updatedAt: Date.now(),
-          createdByEmail: cloudUser?.email || 'unknown' // Audit Trail!
+          ...payload, id: activeExpenseId, date: new Date().toISOString(),
+          isSettled: false, updatedAt: Date.now(), createdByEmail: cloudUser?.email || 'unknown'
         });
       }
 
-      // Update Local State
       if (expenseId) editExpense(group.id, expenseId, payload);
       else addExpense(group.id, payload, cloudUser?.email);
       
       navigate(`/group/${group.id}`);
     } catch (err) {
-      console.error(err);
       alert("Failed to save to cloud. Check internet connection.");
     } finally {
       setIsSaving(false);
@@ -154,8 +158,31 @@ export default function AddExpense() {
         <div>
           <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-3 transition-colors">Who paid?</label>
           <div className="flex flex-wrap gap-2">
+            
+            {/* 🚨 THE TRIP FUND BUTTON */}
+            {group.isFundEnabled && !group.isFundClosed && (
+              <button 
+                onClick={() => {
+                  if (hasSufficientFunds) setPaidBy(VIRTUAL_FUND_ID);
+                }} 
+                className={`px-4 py-2 rounded-full font-bold text-sm transition-all flex items-center gap-1.5 ${
+                  paidBy === VIRTUAL_FUND_ID 
+                    ? 'bg-indigo-600 text-white shadow-md' 
+                    : !hasSufficientFunds 
+                      ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-transparent'
+                      : 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/50 hover:bg-indigo-100'
+                }`}
+              >
+                {!hasSufficientFunds && <Lock className="w-3.5 h-3.5" />}
+                <Landmark className="w-4 h-4" /> Trip Fund (₹{currentLiquidity.toFixed(0)})
+              </button>
+            )}
+
+            {/* Normal Members */}
             {group.members.map(member => (
-              <button key={member.id} onClick={() => setPaidBy(member.id)} className={`px-4 py-2 rounded-full font-semibold text-sm transition-all ${paidBy === member.id ? 'bg-brand-600 dark:bg-brand-500/20 text-white dark:text-brand-400 dark:border-brand-500/50 shadow-md dark:shadow-none border border-transparent' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>{member.name}</button>
+              <button key={member.id} onClick={() => setPaidBy(member.id)} className={`px-4 py-2 rounded-full font-semibold text-sm transition-all ${paidBy === member.id ? 'bg-brand-600 dark:bg-brand-500/20 text-white dark:text-brand-400 dark:border-brand-500/50 shadow-md dark:shadow-none border border-transparent' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+                {member.name}
+              </button>
             ))}
           </div>
         </div>
@@ -172,6 +199,7 @@ export default function AddExpense() {
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 transition-colors duration-300">
+          
           {splitType === 'EQUAL' && (
             <div className="text-center py-4">
               <div className="text-3xl font-bold text-brand-600 dark:text-brand-400 mb-1 transition-colors">₹{totalAmount > 0 ? (totalAmount / group.members.length).toFixed(2) : '0.00'}</div>

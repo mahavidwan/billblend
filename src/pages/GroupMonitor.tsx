@@ -10,8 +10,9 @@ import ExpensesTab from '../components/GroupTabs/ExpensesTab';
 import BalancesTab from '../components/GroupTabs/BalancesTab';
 import SettleTab from '../components/GroupTabs/SettleTab';
 import StatsTab from '../components/GroupTabs/StatsTab';
+import FundTab from '../components/GroupTabs/FundTab';
 
-export type Tab = 'EXPENSES' | 'BALANCES' | 'SETTLE' | 'STATS';
+export type Tab = 'EXPENSES' | 'BALANCES' | 'SETTLE' | 'STATS' | 'FUND'; // 🚨 ADDED FUND
 
 export default function GroupMonitor() {
   const { id } = useParams<{ id: string }>();
@@ -69,9 +70,16 @@ export default function GroupMonitor() {
         <p className="text-brand-100 dark:text-slate-400 font-medium transition-colors">Active Unsettled: <span className="text-white dark:text-brand-400 font-bold text-lg">₹{totalSpent.toFixed(2)}</span></p>
       </div>
 
-      <div className="flex mx-4 mt-4 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800 p-1 transition-colors duration-300 print:hidden">
-        {(['EXPENSES', 'BALANCES', 'SETTLE', 'STATS'] as Tab[]).map((tab) => (
-          <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 py-2.5 text-[10px] sm:text-xs font-bold rounded-lg uppercase tracking-wider transition-all ${activeTab === tab ? 'bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-400 shadow-sm dark:shadow-none' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>{tab}</button>
+      {/* 🚨 DYNAMIC TABS BAR */}
+      <div className="flex mx-4 mt-4 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800 p-1 transition-colors duration-300 print:hidden overflow-x-auto">
+        {(['EXPENSES', 'BALANCES', 'SETTLE', 'STATS', ...(group.isFundEnabled ? ['FUND'] : [])] as Tab[]).map((tab) => (
+          <button 
+            key={tab} 
+            onClick={() => setActiveTab(tab)} 
+            className={`flex-1 min-w-[70px] py-2.5 text-[10px] sm:text-xs font-bold rounded-lg uppercase tracking-wider transition-all ${activeTab === tab ? 'bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-400 shadow-sm dark:shadow-none' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+          >
+            {tab}
+          </button>
         ))}
       </div>
 
@@ -82,6 +90,9 @@ export default function GroupMonitor() {
             {activeTab === 'BALANCES' && <BalancesTab group={group} />}
             {activeTab === 'SETTLE' && <SettleTab group={group} setActiveTab={setActiveTab} />}
             {activeTab === 'STATS' && <StatsTab group={group} />}
+            
+            {/* 🚨 THE NEW FUND TAB */}
+            {activeTab === 'FUND' && <FundTab group={group} setActiveTab={setActiveTab} />}
           </motion.div>
         </AnimatePresence>
       </div>

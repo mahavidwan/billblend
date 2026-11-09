@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type SplitType = 'EQUAL' | 'UNEQUAL' | 'ON_BEHALF' | 'SELECTIVE_EQUAL';
+// 🚨 NEW: Added 'FUND_DEPOSIT' to track when members add money to the pool
+export type SplitType = 'EQUAL' | 'UNEQUAL' | 'ON_BEHALF' | 'SELECTIVE_EQUAL' | 'FUND_DEPOSIT';
 export type Theme = 'light' | 'dark' | 'system';
 
 export interface SplitItem { memberId: string; amount: number; }
@@ -12,14 +13,21 @@ export interface Expense {
 }
 export interface Member { id: string; name: string; email?: string; }
 export interface GroupRoles { admin: string[]; editor: string[]; viewer: string[]; }
+
 export interface Group {
   id: string; name: string; createdAt: string; isPinned?: boolean; members: Member[]; expenses: Expense[];
   updatedAt?: number; isCollaborative?: boolean; firebaseTripId?: string; collabExpiresAt?: number; 
-  roles?: GroupRoles; 
-  terminationMessage?: string; // 🚨 NEW: Stores the reason it went offline
+  roles?: GroupRoles; terminationMessage?: string; 
+  // 🚨 NEW: Trip Fund Flags
+  isFundEnabled?: boolean;
+  isFundClosed?: boolean;
 }
+
 export interface CloudUser { name: string; email: string; picture: string; accessToken: string; tokenExpiry: number; }
 export interface Tombstone { id: string; deletedAt: number; }
+
+// 🚨 CONSTANT: The Virtual Member ID for the Trip Fund
+export const VIRTUAL_FUND_ID = "VIRTUAL_TRIP_FUND";
 
 export interface AppState {
   theme: Theme; groups: Group[]; activeGroupId: string | null; cloudUser: CloudUser | null;
@@ -35,15 +43,13 @@ export interface AppState {
   deleteGroup: (id: string) => void;
   togglePinGroup: (id: string) => void;
   renameGroup: (id: string, newName: string) => void;
-  
-  // 🚨 FIXED: Now accepts adminEmail to prevent the lockout bug!
   enableCollaboration: (groupId: string, firebaseTripId: string, expiresAt: number, adminEmail: string) => void;
-
-  // Action to End Collaboration Mode in a trip
   endCollaboration: (groupId: string, reasonMessage?: string) => void;
-  
-  // 🚨 NEW: Role Management Action
   changeUserRole: (groupId: string, targetEmail: string, newRole: 'admin' | 'editor' | 'viewer') => void;
+  
+  // 🚨 NEW: Fund Toggles
+  toggleFundFeature: (groupId: string, isEnabled: boolean) => void;
+  toggleFundClosure: (groupId: string, isClosed: boolean) => void;
 
   addExpense: (groupId: string, expense: Omit<Expense, 'id' | 'date' | 'updatedAt' | 'createdByEmail'>, creatorEmail?: string) => void;
   deleteExpense: (groupId: string, expenseId: string) => void;
@@ -60,6 +66,7 @@ export const useStore = create<AppState>()(
     (set) => ({
       theme: 'system', groups: [], activeGroupId: null, cloudUser: null, lastSyncTime: null, deletedGroups: [], deletedExpenses: [],
       setTheme: (theme) => set({ theme }), setCloudUser: (cloudUser) => set({ cloudUser }),
+      
       updateGroupFromCloud: (groupId, updatedGroup) => set((state) => ({ groups: state.groups.map(g => g.id === groupId ? { ...updatedGroup, updatedAt: Date.now() } : g) })),
       syncMergeData: (cloudGroups, cloudDelGroups, cloudDelExpenses, lastSyncTime) => set((state) => {
         const newGroupsMap = new Map(cloudGroups.map(g => [g.id, g]));
@@ -91,55 +98,25 @@ export const useStore = create<AppState>()(
       deleteGroup: (id) => set((state) => ({ groups: state.groups.filter((g) => g.id !== id), deletedGroups: [...state.deletedGroups, { id, deletedAt: Date.now() }] })),
       togglePinGroup: (id) => set((state) => ({ groups: state.groups.map((g) => g.id === id ? { ...g, isPinned: !g.isPinned, updatedAt: Date.now() } : g) })),
       renameGroup: (id, newName) => set((state) => ({ groups: state.groups.map((g) => g.id === id ? { ...g, name: newName, updatedAt: Date.now() } : g) })),
-      
-      // 🚨 FIX: Self-Healing Admin Injection
       enableCollaboration: (groupId, firebaseTripId, expiresAt, adminEmail) => set((state) => {
         const cloudUser = state.cloudUser;
         return {
           groups: state.groups.map((g) => {
             if (g.id !== groupId) return g;
-            
-            // SECURITY CHECK: Is the admin's email actually in the members list?
             let updatedMembers = [...g.members];
             const isMember = updatedMembers.some(m => m.email === adminEmail);
-            
-            if (!isMember && cloudUser) {
-              // Auto-inject the Admin into the group so they aren't locked out!
-              updatedMembers.push({
-                id: crypto.randomUUID(),
-                name: cloudUser.name,
-                email: adminEmail
-              });
-            }
-
-            return { 
-              ...g, 
-              members: updatedMembers, // 🚨 Saved the healed members list
-              isCollaborative: true, 
-              firebaseTripId, 
-              collabExpiresAt: expiresAt, 
-              updatedAt: Date.now(),
-              roles: { admin: [adminEmail], editor: [], viewer: [] }
-            };
+            if (!isMember && cloudUser) { updatedMembers.push({ id: crypto.randomUUID(), name: cloudUser.name, email: adminEmail }); }
+            return { ...g, members: updatedMembers, isCollaborative: true, firebaseTripId, collabExpiresAt: expiresAt, updatedAt: Date.now(), roles: { admin: [adminEmail], editor: [], viewer: [] } };
           }) 
         };
       }),
-
-      // 🚨 FIX: Now accepts a reason string so everyone knows WHY it ended
       endCollaboration: (groupId, reasonMessage?: string) => set((state) => ({
         groups: state.groups.map((g) => {
           if (g.id !== groupId) return g;
-          // Strip away all active cloud properties
           const { isCollaborative, firebaseTripId, collabExpiresAt, roles, ...offlineGroup } = g;
-          return { 
-            ...offlineGroup, 
-            updatedAt: Date.now(),
-            terminationMessage: reasonMessage // Save the message to show in the UI!
-          };
+          return { ...offlineGroup, updatedAt: Date.now(), terminationMessage: reasonMessage };
         })
       })),
-
-      // 🚨 NEW: Changes user roles locally
       changeUserRole: (groupId, targetEmail, newRole) => set((state) => ({
         groups: state.groups.map(group => {
           if (group.id !== groupId || !group.roles) return group;
@@ -152,6 +129,10 @@ export const useStore = create<AppState>()(
           return { ...group, roles: newRoles, updatedAt: Date.now() };
         })
       })),
+      
+      // 🚨 NEW: Fund Controls
+      toggleFundFeature: (groupId, isEnabled) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, isFundEnabled: isEnabled, updatedAt: Date.now() } : g) })),
+      toggleFundClosure: (groupId, isClosed) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, isFundClosed: isClosed, updatedAt: Date.now() } : g) })),
 
       addExpense: (groupId, newExpenseData, creatorEmail) => set((state) => ({ groups: state.groups.map((group) => { if (group.id !== groupId) return group; const newExpense: Expense = { ...newExpenseData, id: crypto.randomUUID(), date: new Date().toISOString(), isSettled: false, updatedAt: Date.now(), createdByEmail: creatorEmail }; return { ...group, updatedAt: Date.now(), expenses: [newExpense, ...group.expenses] }; }), })),
       deleteExpense: (groupId, expenseId) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, updatedAt: Date.now(), expenses: g.expenses.filter((e) => e.id !== expenseId) } : g), deletedExpenses: [...state.deletedExpenses, { id: expenseId, deletedAt: Date.now() }] })),

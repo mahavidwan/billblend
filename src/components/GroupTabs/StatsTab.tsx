@@ -1,25 +1,41 @@
 import { motion } from 'framer-motion';
 import { BarChart3, FileText, Trophy, Target, FileDigit } from 'lucide-react';
 import type { Group, Expense } from '../../store';
+import { VIRTUAL_FUND_ID } from '../../store';
 
 export default function StatsTab({ group }: { group: Group }) {
   const activeExpensesAll = group.expenses.filter(e => !e.isSettled);
-  const allRealExpenses = group.expenses.filter(e => !e.isSystemRepayment);
-  const lifetimeTripCost = allRealExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+  
+  // Exclude all System Repays and Fund Deposits for true trip cost calculation
+  const trueExpenses = group.expenses.filter(e => !e.isSystemRepayment && e.splitType !== 'FUND_DEPOSIT');
+  const lifetimeTripCost = trueExpenses.reduce((sum, exp) => sum + exp.amount, 0);
   const avgCostPerPerson = group.members.length > 0 ? lifetimeTripCost / group.members.length : 0;
   
   let biggestExpense: Expense | null = null;
-  if (allRealExpenses.length > 0) {
-    biggestExpense = allRealExpenses.reduce((prev, curr) => (prev.amount > curr.amount) ? prev : curr);
-  }
-  const getMemberName = (memberId: string) => group.members.find(m => m.id === memberId)?.name || 'Unknown';
+  if (trueExpenses.length > 0) biggestExpense = trueExpenses.reduce((prev, curr) => (prev.amount > curr.amount) ? prev : curr);
+  
+  const getMemberName = (memberId: string) => {
+    if (memberId === VIRTUAL_FUND_ID) return 'Trip Fund 🏦';
+    return group.members.find(m => m.id === memberId)?.name || 'Unknown';
+  };
 
   const lifetimeMemberStats = group.members.map(member => {
-    let lifetimePaid = 0; let lifetimeConsumed = 0;
-    allRealExpenses.forEach(exp => {
+    let lifetimePaid = 0; 
+    let lifetimeConsumed = 0;
+    let fundDeposited = 0;
+
+    // Track total out-of-pocket paid and total consumed
+    trueExpenses.forEach(exp => {
       if (exp.paidBy === member.id) lifetimePaid += exp.amount;
       const split = exp.splits.find(s => s.memberId === member.id);
       if (split) lifetimeConsumed += split.amount;
+    });
+
+    // Track how much they put into the Fund
+    group.expenses.forEach(exp => {
+      if (exp.splitType === 'FUND_DEPOSIT' && exp.paidBy === member.id) {
+        fundDeposited += exp.amount;
+      }
     });
 
     let currentNet = 0;
@@ -28,11 +44,12 @@ export default function StatsTab({ group }: { group: Group }) {
       const split = exp.splits.find(s => s.memberId === member.id);
       if (split) currentNet -= split.amount;
     });
-    return { ...member, lifetimePaid, lifetimeConsumed, currentNet };
+
+    return { ...member, lifetimePaid, lifetimeConsumed, fundDeposited, currentNet };
   });
 
-  const maxLifetimeAmount = Math.max(...lifetimeMemberStats.map(m => Math.max(m.lifetimePaid, m.lifetimeConsumed)), 1);
-  const topSpender = [...lifetimeMemberStats].sort((a, b) => b.lifetimePaid - a.lifetimePaid)[0];
+  const maxLifetimeAmount = Math.max(...lifetimeMemberStats.map(m => Math.max(m.lifetimePaid + m.fundDeposited, m.lifetimeConsumed)), 1);
+  const topSpender = [...lifetimeMemberStats].sort((a, b) => (b.lifetimePaid + b.fundDeposited) - (a.lifetimePaid + a.fundDeposited))[0];
 
   const generatePDF = () => setTimeout(() => window.print(), 500);
 
@@ -45,15 +62,15 @@ export default function StatsTab({ group }: { group: Group }) {
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-100 dark:border-slate-800 shadow-sm print:border-slate-200">
           <Target className="w-5 h-5 text-brand-500 mb-2" />
-          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mb-1">Total Trip Cost</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mb-1">Total True Cost</p>
           <p className="text-xl font-bold text-slate-800 dark:text-slate-100">₹{lifetimeTripCost.toFixed(0)}</p>
           <p className="text-[10px] text-slate-400 mt-1">₹{avgCostPerPerson.toFixed(0)} avg / person</p>
         </div>
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-100 dark:border-slate-800 shadow-sm print:border-slate-200">
           <Trophy className="w-5 h-5 text-orange-500 mb-2" />
-          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mb-1">Top Spender</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mb-1">Top Contributor</p>
           <p className="text-xl font-bold text-slate-800 dark:text-slate-100 truncate">{topSpender?.name || '-'}</p>
-          <p className="text-[10px] text-slate-400 mt-1">paid ₹{(topSpender?.lifetimePaid || 0).toFixed(0)} overall</p>
+          <p className="text-[10px] text-slate-400 mt-1">₹{((topSpender?.lifetimePaid || 0) + (topSpender?.fundDeposited || 0)).toFixed(0)} overall</p>
         </div>
       </div>
 
@@ -83,9 +100,10 @@ export default function StatsTab({ group }: { group: Group }) {
             </h4>
             
             <div className="mb-3">
-              <div className="flex justify-between text-xs mb-1.5"><span className="text-slate-500 font-medium">Total Lifetime Paid</span><span className="font-bold text-accent-600">₹{stat.lifetimePaid.toFixed(2)}</span></div>
-              <div className="w-full bg-slate-100 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden print:border print:border-slate-200">
-                <motion.div initial={{ width: 0 }} animate={{ width: `${(stat.lifetimePaid / maxLifetimeAmount) * 100}%` }} transition={{ duration: 0.8, ease: "easeOut" }} className="bg-accent-500 h-full rounded-full print:bg-accent-500" style={{ width: `${(stat.lifetimePaid / maxLifetimeAmount) * 100}%` }} />
+              <div className="flex justify-between text-xs mb-1.5"><span className="text-slate-500 font-medium">Out-of-pocket + Deposits</span><span className="font-bold text-accent-600">₹{(stat.lifetimePaid + stat.fundDeposited).toFixed(2)}</span></div>
+              <div className="w-full bg-slate-100 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden print:border print:border-slate-200 flex">
+                <motion.div initial={{ width: 0 }} animate={{ width: `${(stat.lifetimePaid / maxLifetimeAmount) * 100}%` }} transition={{ duration: 0.8, ease: "easeOut" }} className="bg-accent-500 h-full print:bg-accent-500" style={{ width: `${(stat.lifetimePaid / maxLifetimeAmount) * 100}%` }} title="Out-of-Pocket" />
+                <motion.div initial={{ width: 0 }} animate={{ width: `${(stat.fundDeposited / maxLifetimeAmount) * 100}%` }} transition={{ duration: 0.8, ease: "easeOut" }} className="bg-indigo-500 h-full print:bg-indigo-500" style={{ width: `${(stat.fundDeposited / maxLifetimeAmount) * 100}%` }} title="Deposited to Fund" />
               </div>
             </div>
             
@@ -97,7 +115,7 @@ export default function StatsTab({ group }: { group: Group }) {
             </div>
             
             <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg text-xs leading-relaxed font-medium text-slate-600 dark:text-slate-400 border border-slate-100 dark:border-slate-800 print:border-slate-200 print:text-black">
-              {stat.name} was responsible for <b>{((stat.lifetimeConsumed / lifetimeTripCost) * 100 || 0).toFixed(1)}%</b> of the total trip cost. They physically paid out <b>₹{stat.lifetimePaid.toFixed(0)}</b> overall.
+              {stat.name} physically paid <b>₹{stat.lifetimePaid.toFixed(0)}</b> out-of-pocket, and deposited <b>₹{stat.fundDeposited.toFixed(0)}</b> into the Trip Fund. Their share of the total trip cost was <b>{((stat.lifetimeConsumed / lifetimeTripCost) * 100 || 0).toFixed(1)}%</b>.
             </div>
           </div>
         ))}

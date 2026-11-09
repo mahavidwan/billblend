@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useStore } from '../../store';
+import { useStore, VIRTUAL_FUND_ID } from '../../store'; // 🚨 NEW: Imported VIRTUAL_FUND_ID
 import type { Group, Expense } from '../../store';
 import { cloudDeleteExpense } from '../../utils/firestoreActions';
 import { ReceiptText, Trash2, Edit2, ShieldCheck, Eye, EyeOff, HandCoins, Lock } from 'lucide-react';
@@ -17,13 +17,11 @@ export default function ExpensesTab({ group }: { group: Group }) {
   const isAdmin = !group.isCollaborative || (group.roles?.admin?.includes(userEmail));
   const isViewer = group.isCollaborative && !isAdmin && group.roles?.viewer?.includes(userEmail);
 
-  // Helper to check if a specific user is allowed to touch an expense
   const canModifyExpense = (exp: Expense) => {
-    if (!group.isCollaborative) return true; // Local trips are unrestricted
-    if (isAdmin) return true; // Admins can touch anything
-    if (isViewer) return false; // Viewers can touch nothing
-    // Editors can only touch expenses they created
-    return exp.createdByEmail === userEmail;
+    if (!group.isCollaborative) return true; 
+    if (isAdmin) return true; 
+    if (isViewer) return false; 
+    return exp.createdByEmail === userEmail; 
   };
 
   const activeExpensesAll = group.expenses.filter(e => !e.isSettled);
@@ -31,7 +29,11 @@ export default function ExpensesTab({ group }: { group: Group }) {
   const activeSystemRepayments = activeExpensesAll.filter(e => e.isSystemRepayment);
   const settledExpenses = group.expenses.filter(e => e.isSettled); 
   
-  const getMemberName = (memberId: string) => group.members.find(m => m.id === memberId)?.name || 'Unknown';
+  // 🚨 FIX: Explicitly recognize the Trip Fund!
+  const getMemberName = (memberId: string) => {
+    if (memberId === VIRTUAL_FUND_ID) return 'Trip Fund 🏦';
+    return group.members.find(m => m.id === memberId)?.name || 'Unknown';
+  };
 
   const handleDelete = async (expId: string, isRepay: boolean) => {
     if(window.confirm(isRepay ? 'Undo this partial repayment?' : 'Delete this expense?')) {
@@ -71,7 +73,6 @@ export default function ExpensesTab({ group }: { group: Group }) {
             </p>
           </div>
           
-          {/* 🚨 RBAC: Hide buttons if user lacks permission */}
           {isActive && hasPermission && (
             <div className="flex flex-col gap-1 border-l border-slate-100 dark:border-slate-800 pl-3 transition-colors print:hidden">
               {!isRepay && <button onClick={() => navigate(`/group/${group.id}/expense/${exp.id}/edit`)} className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-brand-600 active:scale-90 bg-slate-50 dark:bg-slate-800 rounded-md transition-all"><Edit2 className="w-3.5 h-3.5" /></button>}
@@ -79,7 +80,6 @@ export default function ExpensesTab({ group }: { group: Group }) {
             </div>
           )}
           
-          {/* 🚨 Show a subtle lock icon if they can't edit it */}
           {isActive && !hasPermission && (
             <Lock className="w-4 h-4 text-slate-300 dark:text-slate-700 ml-2" />
           )}
