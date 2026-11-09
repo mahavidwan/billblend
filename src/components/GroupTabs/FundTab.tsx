@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useStore, VIRTUAL_FUND_ID } from '../../store';
 import type { Group } from '../../store';
 import { cloudSaveExpense, cloudUpdateGroup } from '../../utils/firestoreActions';
-import { Landmark, Plus, ArrowDownCircle, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { Landmark, Plus, ArrowDownCircle, ShieldCheck, AlertTriangle, RefreshCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Tab } from '../../pages/GroupMonitor';
 
@@ -12,23 +12,21 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
   const toggleFundClosure = useStore(state => state.toggleFundClosure);
   
   const [showDepositModal, setShowDepositModal] = useState(false);
-  const [depositAmount, setDepositAmount] = useState(''); // 🚨 STATE DECLARED HERE
+  const [depositAmount, setDepositAmount] = useState(''); 
   const [depositorId, setDepositorId] = useState(group.members[0]?.id || '');
   const [isSaving, setIsSaving] = useState(false);
 
-  // 🚨 RBAC check for adding deposits or closing the fund
+  // RBAC check for adding deposits or closing/reopening the fund
   const isAdmin = !group.isCollaborative || (cloudUser?.email && group.roles?.admin?.includes(cloudUser.email));
   const isEditor = group.isCollaborative && cloudUser?.email && group.roles?.editor?.includes(cloudUser.email);
-  
-  // 🚨 FIX 3: Variable correctly named canModifyFund!
   const canModifyFund = !group.isCollaborative || isAdmin || isEditor;
 
   // --- FUND MATH ENGINE ---
-  const allDeposits = group.expenses.filter(e => e.splitType === 'FUND_DEPOSIT');
+  const allDeposits = group.expenses.filter(e => e.splitType === 'FUND_DEPOSIT' && !e.isSettled);
   const totalDeposited = allDeposits.reduce((sum, d) => sum + d.amount, 0);
   
-  // How much has the Fund paid out for expenses?
-  const fundExpenses = group.expenses.filter(e => e.paidBy === VIRTUAL_FUND_ID);
+  // How much has the Fund paid out for active expenses?
+  const fundExpenses = group.expenses.filter(e => e.paidBy === VIRTUAL_FUND_ID && !e.isSettled);
   const totalSpentFromFund = fundExpenses.reduce((sum, e) => sum + e.amount, 0);
   
   const currentLiquidity = totalDeposited - totalSpentFromFund;
@@ -63,13 +61,24 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
   };
 
   const handleDissolveFund = async () => {
-    if (!isAdmin) { alert("Only Admins can dissolve the fund."); return; }
+    if (!canModifyFund) { alert("You don't have permission to modify the fund."); return; }
     if (window.confirm("Dissolve Trip Fund?\n\nThis will trigger the final settlement payouts, calculating exactly who gets the remaining ₹" + currentLiquidity.toFixed(0) + " cash back.")) {
       toggleFundClosure(group.id, true);
       if (group.isCollaborative && group.firebaseTripId) {
         await cloudUpdateGroup(group.firebaseTripId, { isFundClosed: true });
       }
       setActiveTab('SETTLE'); 
+    }
+  };
+
+  // 🚨 NEW: Restore Fund Action
+  const handleReopenFund = async () => {
+    if (!canModifyFund) { alert("You don't have permission to modify the fund."); return; }
+    if (window.confirm("Reopen Trip Fund?\n\nThis will resume pooling and allow new deposits.")) {
+      toggleFundClosure(group.id, false);
+      if (group.isCollaborative && group.firebaseTripId) {
+        await cloudUpdateGroup(group.firebaseTripId, { isFundClosed: false });
+      }
     }
   };
 
@@ -92,7 +101,6 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Amount (₹)</label>
-                  {/* 🚨 FIX 2: Correctly using setDepositAmount! */}
                   <input type="number" value={depositAmount} onChange={e => setDepositAmount(e.target.value)} placeholder="0.00" className="w-full p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-100" />
                 </div>
               </div>
@@ -130,7 +138,6 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
         </div>
       </div>
 
-      {/* 🚨 FIX 3 applied here! */}
       {canModifyFund && !group.isFundClosed && (
         <button onClick={() => setShowDepositModal(true)} className="w-full bg-indigo-50 dark:bg-indigo-900/20 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800/50 text-indigo-700 dark:text-indigo-400 font-bold p-4 rounded-xl transition-all active:scale-95 flex justify-center items-center gap-2 shadow-sm">
           <Plus className="w-5 h-5" /> Record New Deposit
@@ -160,12 +167,21 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
         </div>
       )}
 
-      {/* DISSOLVE FUND DANGER ZONE */}
+      {/* DISSOLVE / REOPEN FUND ZONE */}
       {group.isFundClosed ? (
-        <div className="bg-slate-100 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 text-center">
-          <ShieldCheck className="w-6 h-6 text-slate-400 mx-auto mb-2" />
-          <h3 className="font-bold text-slate-600 dark:text-slate-300">Fund is Closed</h3>
-          <p className="text-xs text-slate-500 mt-1">Remaining balances have been pushed to the Settle tab for payout.</p>
+        <div className="bg-slate-100 dark:bg-slate-800/50 p-5 rounded-xl border border-slate-200 dark:border-slate-700 text-center space-y-4">
+          <div>
+            <ShieldCheck className="w-6 h-6 text-slate-400 mx-auto mb-2" />
+            <h3 className="font-bold text-slate-600 dark:text-slate-300">Fund is Closed</h3>
+            <p className="text-xs text-slate-500 mt-1">Remaining balances have been pushed to the Settle tab for payout.</p>
+          </div>
+          
+          {/* 🚨 NEW: Reopen Button */}
+          {canModifyFund && (
+            <button onClick={handleReopenFund} className="w-full bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 font-bold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm text-sm">
+              <RefreshCcw className="w-4 h-4" /> Reopen Trip Fund
+            </button>
+          )}
         </div>
       ) : (
         <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
