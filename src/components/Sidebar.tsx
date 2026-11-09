@@ -1,67 +1,29 @@
-import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Cloud, LogOut, User, RefreshCw, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
+import { X, Cloud, LogOut, User, RefreshCw, AlertTriangle, CheckCircle2, XCircle, Users } from 'lucide-react';
 import { useStore } from '../store';
-import { useGoogleLogin } from '@react-oauth/google';
 import { triggerGlobalSync } from '../utils/cloudSync';
+import { useState } from 'react';
 
 interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
+  onLogin: () => void; 
+  onSwitchAccount: () => void; // 🚨 NEW
 }
 
-// Helper to format the timestamp beautifully
 function formatTime(isoString: string | null) {
   if (!isoString) return "Never";
   const d = new Date(isoString);
   return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-export default function Sidebar({ isOpen, onClose }: SidebarProps) {
+export default function Sidebar({ isOpen, onClose, onLogin, onSwitchAccount }: SidebarProps) {
   const user = useStore(state => state.cloudUser);
   const setCloudUser = useStore(state => state.setCloudUser);
   const lastSyncTime = useStore(state => state.lastSyncTime);
   
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
-
-  const login = useGoogleLogin({
-    scope: 'openid profile email https://www.googleapis.com/auth/drive.appdata',
-    onSuccess: async (tokenResponse) => {
-      // 🚨 STRICT CHECK: Did the user check the Drive permission box?
-      const grantedScopes = tokenResponse.scope || '';
-      if (!grantedScopes.includes('drive.appdata')) {
-        alert("Permission Denied: You must check the box to allow access to your Google Drive AppData folder for sync to work!");
-        return;
-      }
-
-      try {
-        setIsLoggingIn(true);
-        const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
-        });
-        const userInfo = await userInfoRes.json();
-        
-        setCloudUser({
-          name: userInfo.name, 
-          email: userInfo.email, 
-          picture: userInfo.picture,
-          accessToken: tokenResponse.access_token,
-          tokenExpiry: Date.now() + (tokenResponse.expires_in * 1000),
-        });
-        
-        setSyncError(null);
-        // Trigger an immediate sync after fresh login
-        await handleManualSync(); 
-      } catch (err) { 
-        alert("Failed to fetch Google Profile."); 
-      } finally { 
-        setIsLoggingIn(false); 
-      }
-    },
-    onError: () => alert("Google Login Failed or was canceled.")
-  });
 
   const handleManualSync = async () => {
     setIsSyncing(true);
@@ -69,23 +31,19 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     const result = await triggerGlobalSync();
     
     if (!result.success) {
-      if (result.error === 'SESSION_EXPIRED') {
-        setSyncError("Session expired. Please click reconnect.");
-      } else {
-        setSyncError(result.error || "Sync failed. Check internet connection.");
-      }
+      if (result.error === 'SESSION_EXPIRED') setSyncError("Session expired. Please click reconnect.");
+      else setSyncError(result.error || "Sync failed. Check internet connection.");
     }
     setIsSyncing(false);
   };
 
   const handleLogout = () => {
-    if (window.confirm("Disconnect Google Drive? Your local trips will remain, but cloud sync will stop.")) {
+    if (window.confirm("Disconnect Google Drive?\n\nYour local trips will remain safely on this device, but they will no longer back up to the cloud.")) {
       setCloudUser(null);
-      useStore.setState({ lastSyncTime: null }); // Clear sync status
+      useStore.setState({ lastSyncTime: null }); 
     }
   };
 
-  // Check if token is expired to dynamically change button text
   const isExpired = user ? Date.now() > user.tokenExpiry : false;
 
   return (
@@ -104,23 +62,29 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
               <div className="flex flex-col items-center text-center">
                 {user ? (
                   <>
-                    {/* 🚨 FIX: Added referrerPolicy to prevent broken images */}
                     <img src={user.picture} alt="Profile" referrerPolicy="no-referrer" className="w-20 h-20 rounded-full shadow-md border-4 border-white dark:border-slate-800 mb-3 object-cover" />
                     <h3 className="font-bold text-xl text-slate-800 dark:text-slate-100">{user.name}</h3>
                     <p className="text-sm text-slate-500 dark:text-slate-400">{user.email}</p>
-                    {isExpired && (
-                       <button onClick={() => login()} className="mt-4 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-orange-200 dark:hover:bg-orange-900/50 transition-colors">
-                         <AlertTriangle className="w-4 h-4" /> Reconnect Session
-                       </button>
-                    )}
+                    
+                    {/* 🚨 THE NEW SWITCH ACCOUNT BUTTON */}
+                    <div className="flex gap-2 mt-4">
+                      {isExpired && (
+                        <button onClick={onLogin} className="bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-orange-200 dark:hover:bg-orange-900/50 transition-colors">
+                          <AlertTriangle className="w-4 h-4" /> Reconnect
+                        </button>
+                      )}
+                      <button onClick={onSwitchAccount} className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+                        <Users className="w-4 h-4" /> Switch Account
+                      </button>
+                    </div>
                   </>
                 ) : (
                   <>
                     <div className="w-20 h-20 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center mb-3 transition-colors"><User className="w-10 h-10 text-slate-400 dark:text-slate-500" /></div>
                     <h3 className="font-bold text-xl text-slate-800 dark:text-slate-100 mb-1">Not logged in</h3>
                     <p className="text-sm text-slate-500 dark:text-slate-400 text-center max-w-[200px] mb-4">Log in to securely backup and sync your trips across devices.</p>
-                    <button onClick={() => login()} disabled={isLoggingIn} className="w-full bg-brand-600 hover:bg-brand-500 disabled:bg-slate-400 text-white font-bold py-3 rounded-xl shadow-md transition-all active:scale-95 flex justify-center items-center gap-2">
-                      <Cloud className="w-5 h-5" /> {isLoggingIn ? 'Connecting...' : 'Connect Google Drive'}
+                    <button onClick={onLogin} className="w-full bg-brand-600 hover:bg-brand-500 text-white font-bold py-3 rounded-xl shadow-md transition-all active:scale-95 flex justify-center items-center gap-2">
+                      <Cloud className="w-5 h-5" /> Connect Google Drive
                     </button>
                   </>
                 )}
@@ -137,13 +101,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                       </p>
                     </div>
                   </div>
-                  
-                  <button 
-                    onClick={handleManualSync} disabled={isSyncing || isExpired}
-                    className="w-full bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-400 font-bold py-2.5 rounded-xl border border-brand-200 dark:border-brand-800/50 hover:bg-brand-100 dark:hover:bg-brand-900/40 disabled:opacity-50 transition-all active:scale-95 flex justify-center items-center gap-2"
-                  >
-                    <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} /> 
-                    {isSyncing ? 'Syncing...' : 'Sync Now'}
+                  <button onClick={handleManualSync} disabled={isSyncing || isExpired} className="w-full bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-400 font-bold py-2.5 rounded-xl border border-brand-200 dark:border-brand-800/50 hover:bg-brand-100 dark:hover:bg-brand-900/40 disabled:opacity-50 transition-all active:scale-95 flex justify-center items-center gap-2">
+                    <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} /> {isSyncing ? 'Syncing...' : 'Sync Now'}
                   </button>
                 </div>
               )}

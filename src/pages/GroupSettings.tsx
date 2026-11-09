@@ -94,10 +94,7 @@ export default function GroupSettings() {
       try {
         setIsEnablingCollab(true); 
         if (group.firebaseTripId) await cloudEndCollaboration(group.firebaseTripId);
-        
-        // 🚨 Appends the local termination message for the Admin
         endCollaboration(group.id, "You manually ended the collaboration.");
-        
         alert("Collaboration ended. Trip is now local-only.");
       } catch (err) {
         alert("Failed to delete trip from cloud.");
@@ -189,7 +186,6 @@ export default function GroupSettings() {
 
       <div className="p-4 space-y-6">
         
-        {/* 🚨 THE TERMINATION MESSAGE BANNER */}
         <AnimatePresence>
           {group.terminationMessage && !group.isCollaborative && (
             <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="bg-red-50 dark:bg-red-900/20 p-4 rounded-2xl border border-red-200 dark:border-red-800/50 flex gap-3">
@@ -202,7 +198,6 @@ export default function GroupSettings() {
           )}
         </AnimatePresence>
 
-        {/* COLLABORATION CARD */}
         <div className={`p-5 rounded-2xl shadow-sm border transition-colors duration-300 ${group.isCollaborative ? 'bg-gradient-to-br from-brand-600 to-brand-800 border-brand-800 text-white' : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800'}`}>
           <div className="flex justify-between items-start mb-2">
             <h3 className={`font-bold flex items-center gap-2 ${group.isCollaborative ? 'text-white' : 'text-slate-800 dark:text-slate-200'}`}>
@@ -310,7 +305,8 @@ export default function GroupSettings() {
                     <button onClick={() => handleRemoveMember(member.id, member.name)} className={`p-2 rounded-lg transition-all ${isEngaged ? 'text-slate-300 bg-slate-100 dark:bg-slate-800/50 cursor-not-allowed' : 'text-red-400 hover:text-red-500 hover:bg-red-50 active:scale-90'}`}><Trash2 className="w-5 h-5" /></button>
                   </div>
                   
-                  {member.email && (
+                  {/* 🚨 THE FIX: Only show roles if the trip is currently collaborative! */}
+                  {group.isCollaborative && member.email && (
                     <div className="flex items-center gap-2 mt-1 border-t border-slate-200 dark:border-slate-800 pt-2">
                       <ShieldCheck className="w-3 h-3 text-slate-400" />
                       <select 
