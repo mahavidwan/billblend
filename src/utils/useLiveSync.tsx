@@ -6,7 +6,9 @@ import type { Group, Expense } from '../store';
 
 export function useLiveSync(group: Group) {
   const updateGroupFromCloud = useStore(state => state.updateGroupFromCloud);
-  const endCollaboration = useStore(state => state.endCollaboration); // 🚨 NEW
+  const endCollaboration = useStore(state => state.endCollaboration);
+  const deleteGroup = useStore(state => state.deleteGroup); // 🚨 NEW
+  const cloudUser = useStore(state => state.cloudUser);
 
   useEffect(() => {
     if (!group.isCollaborative || !group.firebaseTripId) return;
@@ -14,24 +16,25 @@ export function useLiveSync(group: Group) {
     const tripRef = doc(db, 'trips', group.firebaseTripId);
     
     const unsubscribeTrip = onSnapshot(tripRef, async (docSnap) => {
-      
-      // 🚨 THE FIX: What happens if the document is deleted by an Admin or TTL expiration?
       if (!docSnap.exists()) {
-        console.warn(`Live Trip ${group.firebaseTripId} was deleted from Firestore.`);
-        
-        // Determine the reason based on the TTL
         let reason = "An Admin ended the collaboration.";
-        if (group.collabExpiresAt && Date.now() > group.collabExpiresAt) {
-          reason = "The collaboration time-limit naturally expired.";
-        }
-        
-        // Force the app to safely sever the connection and revert to offline mode!
+        if (group.collabExpiresAt && Date.now() > group.collabExpiresAt) reason = "The collaboration time-limit naturally expired.";
         endCollaboration(group.id, reason);
         return;
       }
 
-      // ... If the document still exists, process updates normally ...
       const data = docSnap.data();
+      
+      // 🚨 NEW SECURITY CHECK: If this user was kicked from the trip, DELETE it from their device!
+      if (cloudUser?.email) {
+        const isStillMember = data.members.some((m: any) => m.email === cloudUser.email);
+        if (!isStillMember) {
+          console.warn("You were removed from this trip.");
+          deleteGroup(group.id); // Wipe it from their local app entirely
+          return;
+        }
+      }
+      
       const expensesRef = collection(db, `trips/${group.firebaseTripId}/expenses`);
       const q = query(expensesRef);
       
@@ -49,12 +52,9 @@ export function useLiveSync(group: Group) {
         const newUpdateTime = data.updatedAt || Date.now();
         if (newUpdateTime >= (group.updatedAt || 0) || data.members.length !== group.members.length) {
           const updatedGroup: Group = {
-            ...group,
-            name: data.name,
-            members: data.members,
-            roles: data.roles,
-            expenses: liveExpenses,
-            updatedAt: newUpdateTime
+            ...group, name: data.name, members: data.members, roles: data.roles,
+            isFundEnabled: data.isFundEnabled, isFundClosed: data.isFundClosed, // Keep fund states synced
+            expenses: liveExpenses, updatedAt: newUpdateTime
           };
           updateGroupFromCloud(group.id, updatedGroup);
         }
@@ -64,7 +64,7 @@ export function useLiveSync(group: Group) {
     });
 
     return () => unsubscribeTrip(); 
-  }, [group.id, group.firebaseTripId, group.isCollaborative, group.updatedAt]); 
+  }, [group.id, group.firebaseTripId, group.isCollaborative, group.updatedAt, cloudUser?.email]); 
 }
 
 export function GlobalLiveSyncManager() {

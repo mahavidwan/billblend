@@ -25,6 +25,20 @@ export default function AddExpense() {
   const [selectedForSplit, setSelectedForSplit] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
+  // 🚨 NEW SECURITY: Block route hacking!
+  useEffect(() => {
+    if (group && group.isCollaborative) {
+      const userEmail = cloudUser?.email || '';
+      const isAdmin = group.roles?.admin?.includes(userEmail);
+      const isEditor = group.roles?.editor?.includes(userEmail);
+      
+      if (!isAdmin && !isEditor) {
+        alert("Security Violation: Viewers are not allowed to add expenses.");
+        navigate('/', { replace: true });
+      }
+    }
+  }, [group, cloudUser, navigate]);
+
   // 🚨 OVERDRAFT PROTECTION MATH
   const totalAmount = parseFloat(amountStr) || 0;
   

@@ -6,14 +6,12 @@ import { useStore } from '../store';
 import type { Group, Expense } from '../store';
 import { Cloud, AlertCircle, Users, Zap, CheckCircle2 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { useAuth } from '../utils/useAuth'; // 🚨 SINGLE SOURCE OF TRUTH
+import { useAuth } from '../utils/useAuth'; 
 
-// 🚨 NEW: Auto-Sequencer for Duplicate Names
 function generateUniqueName(baseName: string, existingNames: string[]): string {
   let uniqueName = baseName;
   let counter = 2;
   const lowerNames = existingNames.map(n => n.toLowerCase());
-  
   while (lowerNames.includes(uniqueName.toLowerCase())) {
     uniqueName = `${baseName} (${counter})`;
     counter++;
@@ -27,7 +25,7 @@ export default function JoinTrip() {
   
   const cloudUser = useStore(state => state.cloudUser);
   const importGroup = useStore(state => state.importGroup);
-  const { login, isLoggingIn } = useAuth(); // 🚨 NEW
+  const { login, isLoggingIn } = useAuth();
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,9 +33,6 @@ export default function JoinTrip() {
   const [joining, setJoining] = useState(false);
 
   useEffect(() => {
-    const existingGroup = useStore.getState().groups.find(g => g.firebaseTripId === tripId);
-    if (existingGroup) { navigate(`/group/${existingGroup.id}`, { replace: true }); return; }
-
     async function fetchTripDetails() {
       if (!tripId) return;
       try {
@@ -48,11 +43,24 @@ export default function JoinTrip() {
         const data = tripSnap.data();
         if (data.expiresAt && data.expiresAt.toMillis() < Date.now()) { setError("This collaboration session has expired."); setLoading(false); return; }
         
+        // 🚨 NEW SECURITY CHECK: If they are already in the cloud database, let them straight in!
+        const isAlreadyMember = cloudUser && data.members.some((m: any) => m.email === cloudUser.email);
+        
+        if (isAlreadyMember) {
+          // Find their local copy and navigate. If missing locally, it will download in handleJoin!
+          const existingGroup = useStore.getState().groups.find(g => g.firebaseTripId === tripId);
+          if (existingGroup) {
+            navigate(`/group/${existingGroup.id}`, { replace: true });
+            return;
+          }
+        }
+
+        // If they are not in the cloud array, they MUST go through the join flow below!
         setTripPreview({ name: data.name, membersCount: data.members.length, expiresAt: data.expiresAt.toMillis(), admin: data.roles?.admin?.[0] || 'Unknown', rawMembers: data.members, createdAt: data.createdAt });
       } catch (err) { setError("Failed to connect to the secure server."); } finally { setLoading(false); }
     }
     fetchTripDetails();
-  }, [tripId, navigate]);
+  }, [tripId, navigate, cloudUser]); // Re-run if cloudUser changes after login!
 
   const handleJoin = async () => {
     if (!cloudUser || !tripId || !tripPreview) return;
@@ -60,13 +68,13 @@ export default function JoinTrip() {
       setJoining(true);
       const tripRef = doc(db, 'trips', tripId);
       
-      // 🚨 FIX: Auto-Sequencer (e.g. "Debanjan Sarkar (2)")
       const existingNames = tripPreview.rawMembers.map((m: any) => m.name);
       const safeUniqueName = generateUniqueName(cloudUser.name, existingNames);
       
       const newMember = { id: crypto.randomUUID(), name: safeUniqueName, email: cloudUser.email };
       const timeNow = Date.now();
       
+      // Push to Firebase!
       await updateDoc(tripRef, {
         members: arrayUnion(newMember),
         'roles.viewer': arrayUnion(cloudUser.email),
@@ -78,6 +86,7 @@ export default function JoinTrip() {
       const liveExpenses: Expense[] = [];
       expensesSnap.forEach((d) => liveExpenses.push(d.data() as Expense));
 
+      // Overwrite/Create the local state
       const newGroup: Group = {
         id: crypto.randomUUID(), name: tripPreview.name, createdAt: tripPreview.createdAt,
         members: [...tripPreview.rawMembers, newMember], 
@@ -113,7 +122,6 @@ export default function JoinTrip() {
           </div>
         </div>
 
-        {/* 🚨 SEAMLESS ONBOARDING */}
         {!cloudUser ? (
           <div className="space-y-4">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Step 1: Authenticate</p>
