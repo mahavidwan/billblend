@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
+import { isValidName, isDuplicateName, formatName } from '../utils/validation'; // 🚨 NEW
 import { ArrowLeft, Plus, Trash2, Users, Download } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -8,23 +9,19 @@ export default function CreateGroup() {
   const navigate = useNavigate();
   const createGroup = useStore((state) => state.createGroup);
   const pastGroups = useStore((state) => state.groups); 
-  const cloudUser = useStore((state) => state.cloudUser); // 🚨 GET LOGGED IN USER
+  const cloudUser = useStore((state) => state.cloudUser); 
   
   const [groupName, setGroupName] = useState('');
-  const [members, setMembers] = useState(['']); // Start with 1 empty slot
+  const [members, setMembers] = useState(['']); 
 
-  // 🚨 AUTO-FILL CREATOR
   useEffect(() => {
-    if (cloudUser) {
-      setMembers([cloudUser.name]); // Put them in as member 1!
-    } else {
-      setMembers(['', '']); // Fallback to 2 empty slots if offline
-    }
+    if (cloudUser) setMembers([cloudUser.name]); 
+    else setMembers(['', '']); 
   }, [cloudUser]);
 
   const handleAddMember = () => setMembers([...members, '']);
   const handleRemoveMember = (index: number) => {
-    if (members.length <= 1) return; // 🚨 NOW ALLOWS JUST 1 MEMBER!
+    if (members.length <= 1) return;
     setMembers(members.filter((_, i) => i !== index));
   };
   const handleMemberChange = (index: number, value: string) => {
@@ -45,11 +42,34 @@ export default function CreateGroup() {
   };
 
   const handleSave = () => {
-    const validMembers = members.filter(m => m.trim() !== '');
-    if (groupName.trim() === '' || validMembers.length < 1) {
-      alert("Please enter a group name and at least 1 member!");
+    // 🚨 STRICT VALIDATION ENGINE
+    if (!groupName.trim()) { alert("Please enter a group name."); return; }
+    
+    const validMembers: string[] = [];
+    
+    for (let rawName of members) {
+      if (!rawName.trim()) continue; // Skip empty boxes
+      
+      const cleanName = formatName(rawName);
+      
+      if (!isValidName(cleanName)) {
+        alert(`"${rawName}" is too short. Names must have at least 3 letters/numbers.`);
+        return;
+      }
+      
+      if (isDuplicateName(cleanName, validMembers)) {
+        alert(`The name "${cleanName}" is a duplicate! Every member must have a unique name.`);
+        return;
+      }
+      
+      validMembers.push(cleanName);
+    }
+
+    if (validMembers.length < 1) {
+      alert("Please add at least 1 valid member.");
       return;
     }
+
     const newGroupId = createGroup(groupName.trim(), validMembers);
     navigate(`/group/${newGroupId}`, { replace: true });
   };
@@ -57,9 +77,7 @@ export default function CreateGroup() {
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="pb-28 min-h-screen transition-colors duration-300">
       <div className="bg-white dark:bg-slate-900 px-4 py-4 flex items-center gap-4 shadow-sm sticky top-0 z-10 border-b border-slate-100 dark:border-slate-800 transition-colors duration-300">
-        <button onClick={() => navigate(-1)} className="text-slate-500 dark:text-slate-400 p-1 active:bg-slate-100 dark:active:bg-slate-800 rounded-full transition-colors">
-          <ArrowLeft className="w-6 h-6" /> 
-        </button>
+        <button onClick={() => navigate(-1)} className="text-slate-500 dark:text-slate-400 p-1 active:bg-slate-100 dark:active:bg-slate-800 rounded-full transition-colors"><ArrowLeft className="w-6 h-6" /></button>
         <span className="font-bold text-slate-500 dark:text-slate-400 transition-colors">Back</span>
       </div>
 
@@ -72,7 +90,7 @@ export default function CreateGroup() {
           <div>
             <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 transition-colors">Group Name</label>
             <input type="text" value={groupName} onChange={(e) => setGroupName(e.target.value)} placeholder="Enter group name..." 
-                   className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 dark:focus:ring-brand-400 shadow-sm dark:shadow-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 transition-colors" />
+                   className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 transition-colors" />
           </div>
 
           <div>
@@ -93,15 +111,14 @@ export default function CreateGroup() {
               {members.map((member, index) => (
                 <div key={index} className="flex items-center gap-2">
                   <input type="text" value={member} onChange={(e) => handleMemberChange(index, e.target.value)} placeholder={index === 0 && cloudUser ? `${cloudUser.name} (You)` : `Member ${index + 1} name`} 
-                         className="flex-1 p-3.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 dark:focus:ring-brand-400 shadow-sm dark:shadow-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 transition-colors" />
-                  <button onClick={() => handleRemoveMember(index)} disabled={members.length <= 1} 
-                          className="p-3.5 text-red-400 dark:text-red-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-30 disabled:cursor-not-allowed bg-red-50 dark:bg-red-900/10 rounded-xl transition-all">
+                         className="flex-1 p-3.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 transition-colors" />
+                  <button onClick={() => handleRemoveMember(index)} disabled={members.length <= 1} className="p-3.5 text-red-400 dark:text-red-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-30 disabled:cursor-not-allowed bg-red-50 dark:bg-red-900/10 rounded-xl transition-all">
                     <Trash2 className="w-5 h-5" />
                   </button>
                 </div>
               ))}
             </div>
-            <button onClick={handleAddMember} className="mt-4 flex items-center gap-2 text-brand-600 dark:text-brand-400 font-medium hover:text-brand-700 dark:hover:text-brand-300 p-2 transition-colors">
+            <button onClick={handleAddMember} className="mt-4 flex items-center gap-2 text-brand-600 dark:text-brand-400 font-medium hover:text-brand-700 p-2 transition-colors">
               <Plus className="w-4 h-4" /> Add another person
             </button>
           </div>
@@ -109,7 +126,7 @@ export default function CreateGroup() {
 
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-t border-slate-100 dark:border-slate-800 flex justify-center z-10 transition-colors duration-300">
           <div className="w-full max-w-md">
-            <button onClick={handleSave} className="w-full bg-brand-600 dark:bg-brand-700 hover:bg-brand-700 dark:hover:bg-brand-600 text-white font-bold text-lg py-4 rounded-xl shadow-lg dark:shadow-none active:scale-[0.98] transition-all">
+            <button onClick={handleSave} className="w-full bg-brand-600 dark:bg-brand-700 hover:bg-brand-700 text-white font-bold text-lg py-4 rounded-xl shadow-lg active:scale-[0.98] transition-all">
               Create Group
             </button>
           </div>

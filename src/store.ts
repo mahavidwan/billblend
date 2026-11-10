@@ -56,9 +56,11 @@ export interface AppState {
   editExpense: (groupId: string, expenseId: string, updatedData: Omit<Expense, 'id' | 'date' | 'updatedAt'>) => void;
   settleAllExpenses: (groupId: string) => void;
   recordRepayments: (groupId: string, repayments: Omit<Expense, 'id' | 'date' | 'updatedAt' | 'createdByEmail'>[]) => void;
+  
   addMember: (groupId: string, name: string, email?: string) => void;
   removeMember: (groupId: string, memberId: string) => void;
   mergeMembers: (groupId: string, ghostId: string, targetId: string) => void; 
+  renameMember: (groupId: string, memberId: string, newName: string) => void;
 }
 
 export const useStore = create<AppState>()(
@@ -142,6 +144,16 @@ export const useStore = create<AppState>()(
       addMember: (groupId, name, email) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, updatedAt: Date.now(), members: [...g.members, { id: crypto.randomUUID(), name, email }] } : g) })),
       removeMember: (groupId, memberId) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, updatedAt: Date.now(), members: g.members.filter((m) => m.id !== memberId) } : g) })),
       mergeMembers: (groupId, ghostId, targetId) => set((state) => ({ groups: state.groups.map(group => { if (group.id !== groupId) return group; const updatedExpenses = group.expenses.map(exp => { let isModified = false; let newPaidBy = exp.paidBy; if (newPaidBy === ghostId) { newPaidBy = targetId; isModified = true; } let newSplits = [...exp.splits]; const ghostSplitIdx = newSplits.findIndex(s => s.memberId === ghostId); if (ghostSplitIdx !== -1) { isModified = true; const ghostAmount = newSplits[ghostSplitIdx].amount; newSplits.splice(ghostSplitIdx, 1); const targetSplitIdx = newSplits.findIndex(s => s.memberId === targetId); if (targetSplitIdx !== -1) newSplits[targetSplitIdx].amount += ghostAmount; else newSplits.push({ memberId: targetId, amount: ghostAmount }); } if (isModified) return { ...exp, paidBy: newPaidBy, splits: newSplits, updatedAt: Date.now() }; return exp; }); const updatedMembers = group.members.filter(m => m.id !== ghostId); return { ...group, members: updatedMembers, expenses: updatedExpenses, updatedAt: Date.now() }; }) })),
+      renameMember: (groupId, memberId, newName) => set((state) => ({
+        groups: state.groups.map(g => {
+          if (g.id !== groupId) return g;
+          return {
+            ...g,
+            updatedAt: Date.now(),
+            members: g.members.map(m => m.id === memberId ? { ...m, name: newName } : m)
+          };
+        })
+      })),
     }),
     { name: 'billblend-storage' }
   )
