@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-// 🚨 NEW: Added 'FUND_DEPOSIT' to track when members add money to the pool
 export type SplitType = 'EQUAL' | 'UNEQUAL' | 'ON_BEHALF' | 'SELECTIVE_EQUAL' | 'FUND_DEPOSIT';
 export type Theme = 'light' | 'dark' | 'system';
 
@@ -18,15 +17,12 @@ export interface Group {
   id: string; name: string; createdAt: string; isPinned?: boolean; members: Member[]; expenses: Expense[];
   updatedAt?: number; isCollaborative?: boolean; firebaseTripId?: string; collabExpiresAt?: number; 
   roles?: GroupRoles; terminationMessage?: string; 
-  // 🚨 NEW: Trip Fund Flags
-  isFundEnabled?: boolean;
-  isFundClosed?: boolean;
+  isFundEnabled?: boolean; isFundClosed?: boolean;
 }
 
 export interface CloudUser { name: string; email: string; picture: string; accessToken: string; tokenExpiry: number; }
 export interface Tombstone { id: string; deletedAt: number; }
 
-// 🚨 CONSTANT: The Virtual Member ID for the Trip Fund
 export const VIRTUAL_FUND_ID = "VIRTUAL_TRIP_FUND";
 
 export interface AppState {
@@ -45,26 +41,20 @@ export interface AppState {
   renameGroup: (id: string, newName: string) => void;
   enableCollaboration: (groupId: string, firebaseTripId: string, expiresAt: number, adminEmail: string) => void;
   endCollaboration: (groupId: string, reasonMessage?: string) => void;
-  // 🚨 NEW: Extend Time Action
   extendCollaboration: (groupId: string, newExpiresAt: number) => void;
-
   changeUserRole: (groupId: string, targetEmail: string, newRole: 'admin' | 'editor' | 'viewer') => void;
-  
-  // 🚨 NEW: Fund Toggles
   toggleFundFeature: (groupId: string, isEnabled: boolean) => void;
   toggleFundClosure: (groupId: string, isClosed: boolean) => void;
 
-  // 🚨 FIX: Now explicitly requires the 'id' parameter!
-  addExpense: (groupId: string, expense: Omit<Expense, 'date' | 'updatedAt' | 'createdByEmail'>, creatorEmail?: string) => void;  
+  addExpense: (groupId: string, expense: Omit<Expense, 'updatedAt'>) => void;
   deleteExpense: (groupId: string, expenseId: string) => void;
-  editExpense: (groupId: string, expenseId: string, updatedData: Omit<Expense, 'id' | 'date' | 'updatedAt'>) => void;
+  editExpense: (groupId: string, expenseId: string, updatedData: Omit<Expense, 'updatedAt'>) => void;
   settleAllExpenses: (groupId: string) => void;
-  recordRepayments: (groupId: string, repayments: Omit<Expense, 'id' | 'date' | 'updatedAt' | 'createdByEmail'>[]) => void;
+  recordRepayments: (groupId: string, repayments: Omit<Expense, 'updatedAt'>[]) => void;
   
   addMember: (groupId: string, name: string, email?: string) => void;
   removeMember: (groupId: string, memberId: string) => void;
   mergeMembers: (groupId: string, ghostId: string, targetId: string) => void; 
-  renameMember: (groupId: string, memberId: string, newName: string) => void;
 }
 
 export const useStore = create<AppState>()(
@@ -123,62 +113,49 @@ export const useStore = create<AppState>()(
           return { ...offlineGroup, updatedAt: Date.now(), terminationMessage: reasonMessage };
         })
       })),
-      // 🚨 NEW: Extend Collaboration implementation
-      extendCollaboration: (groupId, newExpiresAt) => set((state) => ({
-        groups: state.groups.map(g => g.id === groupId ? {
-          ...g,
-          collabExpiresAt: newExpiresAt,
-          updatedAt: Date.now()
-        } : g)
-      })),
+      extendCollaboration: (groupId, newExpiresAt) => set((state) => ({ groups: state.groups.map(g => g.id === groupId ? { ...g, collabExpiresAt: newExpiresAt, updatedAt: Date.now() } : g) })),
       changeUserRole: (groupId, targetEmail, newRole) => set((state) => ({
         groups: state.groups.map(group => {
           if (group.id !== groupId || !group.roles) return group;
-          const newRoles = {
-            admin: group.roles.admin.filter(e => e !== targetEmail),
-            editor: group.roles.editor?.filter(e => e !== targetEmail) || [],
-            viewer: group.roles.viewer?.filter(e => e !== targetEmail) || [],
-          };
+          const newRoles = { admin: group.roles.admin.filter(e => e !== targetEmail), editor: group.roles.editor?.filter(e => e !== targetEmail) || [], viewer: group.roles.viewer?.filter(e => e !== targetEmail) || [] };
           newRoles[newRole].push(targetEmail);
           return { ...group, roles: newRoles, updatedAt: Date.now() };
         })
       })),
-      
-      // 🚨 NEW: Fund Controls
       toggleFundFeature: (groupId, isEnabled) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, isFundEnabled: isEnabled, updatedAt: Date.now() } : g) })),
       toggleFundClosure: (groupId, isClosed) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, isFundClosed: isClosed, updatedAt: Date.now() } : g) })),
 
-      // 🚨 FIX: Accepts the unified ID from the UI to prevent double-counting via WebSockets
-      addExpense: (groupId, newExpenseData, creatorEmail) => set((state) => ({
+      // 🚨 FIX 1: Rigidly relies on the UI's payload without regenerating core properties!
+      addExpense: (groupId, newExpenseData) => set((state) => ({
         groups: state.groups.map((group) => {
           if (group.id !== groupId) return group;
-          const newExpense: Expense = { 
-            ...newExpenseData, 
-            date: new Date().toISOString(), 
-            isSettled: false, 
-            updatedAt: Date.now(), 
-            createdByEmail: creatorEmail 
-          };
+          const newExpense: Expense = { ...newExpenseData, updatedAt: Date.now() };
           return { ...group, updatedAt: Date.now(), expenses: [newExpense, ...group.expenses] };
         }),
       })),
       deleteExpense: (groupId, expenseId) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, updatedAt: Date.now(), expenses: g.expenses.filter((e) => e.id !== expenseId) } : g), deletedExpenses: [...state.deletedExpenses, { id: expenseId, deletedAt: Date.now() }] })),
-      editExpense: (groupId, expenseId, updatedData) => set((state) => ({ groups: state.groups.map((g) => { if (g.id !== groupId) return g; return { ...g, updatedAt: Date.now(), expenses: g.expenses.map((e) => e.id === expenseId ? { ...e, ...updatedData, updatedAt: Date.now() } : e) }; }) })),
+      
+      // 🚨 FIX 2: Editing relies purely on payload updates
+      editExpense: (groupId, expenseId, updatedData) => set((state) => ({
+        groups: state.groups.map((g) => {
+          if (g.id !== groupId) return g;
+          return { ...g, updatedAt: Date.now(), expenses: g.expenses.map((e) => e.id === expenseId ? { ...e, ...updatedData, updatedAt: Date.now() } : e) };
+        })
+      })),
       settleAllExpenses: (groupId) => set((state) => ({ groups: state.groups.map((g) => { if (g.id !== groupId) return g; return { ...g, updatedAt: Date.now(), expenses: g.expenses.map((e) => ({ ...e, isSettled: true, updatedAt: Date.now() })) }; }) })),
-      recordRepayments: (groupId, repayments) => set((state) => ({ groups: state.groups.map((g) => { if (g.id !== groupId) return g; const newExpenses = repayments.map(r => ({ ...r, id: crypto.randomUUID(), date: new Date().toISOString(), isSettled: false, updatedAt: Date.now() })); return { ...g, updatedAt: Date.now(), expenses: [...newExpenses, ...g.expenses] }; }) })),
+      
+      // 🚨 FIX 3: Repayments rely entirely on the exact payload passed from SettleTab!
+      recordRepayments: (groupId, repayments) => set((state) => ({
+        groups: state.groups.map((g) => {
+          if (g.id !== groupId) return g;
+          const newExpenses = repayments.map(r => ({ ...r, updatedAt: Date.now() }));
+          return { ...g, updatedAt: Date.now(), expenses: [...newExpenses, ...g.expenses] };
+        })
+      })),
+
       addMember: (groupId, name, email) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, updatedAt: Date.now(), members: [...g.members, { id: crypto.randomUUID(), name, email }] } : g) })),
       removeMember: (groupId, memberId) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, updatedAt: Date.now(), members: g.members.filter((m) => m.id !== memberId) } : g) })),
       mergeMembers: (groupId, ghostId, targetId) => set((state) => ({ groups: state.groups.map(group => { if (group.id !== groupId) return group; const updatedExpenses = group.expenses.map(exp => { let isModified = false; let newPaidBy = exp.paidBy; if (newPaidBy === ghostId) { newPaidBy = targetId; isModified = true; } let newSplits = [...exp.splits]; const ghostSplitIdx = newSplits.findIndex(s => s.memberId === ghostId); if (ghostSplitIdx !== -1) { isModified = true; const ghostAmount = newSplits[ghostSplitIdx].amount; newSplits.splice(ghostSplitIdx, 1); const targetSplitIdx = newSplits.findIndex(s => s.memberId === targetId); if (targetSplitIdx !== -1) newSplits[targetSplitIdx].amount += ghostAmount; else newSplits.push({ memberId: targetId, amount: ghostAmount }); } if (isModified) return { ...exp, paidBy: newPaidBy, splits: newSplits, updatedAt: Date.now() }; return exp; }); const updatedMembers = group.members.filter(m => m.id !== ghostId); return { ...group, members: updatedMembers, expenses: updatedExpenses, updatedAt: Date.now() }; }) })),
-      renameMember: (groupId, memberId, newName) => set((state) => ({
-        groups: state.groups.map(g => {
-          if (g.id !== groupId) return g;
-          return {
-            ...g,
-            updatedAt: Date.now(),
-            members: g.members.map(m => m.id === memberId ? { ...m, name: newName } : m)
-          };
-        })
-      })),
     }),
     { name: 'billblend-storage' }
   )

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useStore, VIRTUAL_FUND_ID } from '../../store';
-import type { Group } from '../../store';
+import type { Group, Expense } from '../../store';
 import { cloudSaveExpense, cloudUpdateGroup, cloudDeleteExpense } from '../../utils/firestoreActions';
 import { Landmark, Plus, ArrowDownCircle, ShieldCheck, AlertTriangle, RefreshCcw, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -9,7 +9,7 @@ import type { Tab } from '../../pages/GroupMonitor';
 export default function FundTab({ group, setActiveTab }: { group: Group, setActiveTab: (t: Tab) => void }) {
   const cloudUser = useStore(state => state.cloudUser);
   const addExpense = useStore(state => state.addExpense);
-  const deleteExpense = useStore(state => state.deleteExpense); // 🚨 NEW
+  const deleteExpense = useStore(state => state.deleteExpense); 
   const toggleFundClosure = useStore(state => state.toggleFundClosure);
   
   const [showDepositModal, setShowDepositModal] = useState(false);
@@ -35,38 +35,37 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
     
     setIsSaving(true);
     
-    // 🚨 FIX: Generate the unified ID here!
-    const masterDepositId = crypto.randomUUID();
-    
-    const payload = {
-      id: masterDepositId,
+    // 🚨 UNIFIED PAYLOAD CREATOR
+    const payload: Expense = {
+      id: crypto.randomUUID(), // One Master ID
       description: `Fund Deposit by ${getMemberName(depositorId)}`,
       amount: amt,
       paidBy: depositorId,
       splitType: 'FUND_DEPOSIT' as const,
       splits: [], 
+      date: new Date().toISOString(),
+      isSettled: false,
+      createdByEmail: cloudUser?.email || 'unknown'
     };
 
     try {
       if (group.isCollaborative && group.firebaseTripId) {
         await cloudSaveExpense(group.firebaseTripId, {
-          ...payload, date: new Date().toISOString(),
-          isSettled: false, updatedAt: Date.now(), createdByEmail: cloudUser?.email || 'unknown'
+          ...payload, updatedAt: Date.now()
         });
       }
-      addExpense(group.id, payload, cloudUser?.email);
+      addExpense(group.id, payload);
       setDepositAmount('');
       setShowDepositModal(false);
     } catch (err) { alert("Failed to save deposit."); }
     finally { setIsSaving(false); }
   };
 
-  // 🚨 NEW: Safe Deposit Deletion Logic
   const handleDeleteDeposit = async (depositId: string, amount: number) => {
     if (!canModifyFund) { alert("You don't have permission to modify the fund."); return; }
     
-    // MATHEMATICAL SAFEGUARD
-    if (currentLiquidity - amount < 0) {
+    // 🚨 OVERDRAFT DELETION GUARD
+    if (currentLiquidity - amount < -0.01) {
       alert(`⚠️ Cannot delete this deposit!\n\nThe group has already spent this money. Deleting this would cause the Trip Fund to go negative by ₹${Math.abs(currentLiquidity - amount).toFixed(2)}.\n\nYou must delete some expenses first before removing this deposit.`);
       return;
     }
@@ -75,10 +74,7 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
       if (group.isCollaborative && group.firebaseTripId) {
         try {
           await cloudDeleteExpense(group.firebaseTripId, depositId, cloudUser?.email || 'unknown');
-        } catch (err) {
-          alert("Cloud delete failed. Try again.");
-          return;
-        }
+        } catch (err) { alert("Cloud delete failed. Try again."); return; }
       }
       deleteExpense(group.id, depositId);
     }
@@ -86,6 +82,15 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
 
   const handleDissolveFund = async () => {
     if (!isAdmin) { alert("Only Admins can dissolve the fund."); return; }
+    
+    // 🚨 P2P SETTLEMENT GUARD
+    const p2pDebts = calculatePendingP2PDebts();
+    if (p2pDebts > 0) {
+      alert(`⚠️ Cannot dissolve the fund yet!\n\nThere are pending out-of-pocket settlements between members. Please go to the SETTLE tab and record all out-of-pocket transactions first.`);
+      setActiveTab('SETTLE');
+      return;
+    }
+
     if (window.confirm("Dissolve Trip Fund?\n\nThis will trigger the final settlement payouts, calculating exactly who gets the remaining ₹" + currentLiquidity.toFixed(0) + " cash back.")) {
       toggleFundClosure(group.id, true);
       if (group.isCollaborative && group.firebaseTripId) await cloudUpdateGroup(group.firebaseTripId, { isFundClosed: true });
@@ -101,13 +106,28 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
     }
   };
 
+  // Helper to check for active P2P debts before allowing closure
+  const calculatePendingP2PDebts = () => {
+    const activeExps = group.expenses.filter(e => !e.isSettled);
+    const balances: Record<string, number> = {};
+    group.members.forEach(m => { if (m.id !== VIRTUAL_FUND_ID) balances[m.id] = 0; });
+    activeExps.forEach(exp => {
+      if (exp.paidBy !== VIRTUAL_FUND_ID && balances[exp.paidBy] !== undefined) balances[exp.paidBy] += exp.amount; 
+      exp.splits.forEach(split => { if (balances[split.memberId] !== undefined) balances[split.memberId] -= split.amount; });
+    });
+    return Object.values(balances).filter(b => b < -0.01).length;
+  };
+
   return (
     <div className="space-y-6">
+      
+      {/* THE DEPOSIT MODAL */}
       <AnimatePresence>
         {showDepositModal && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-3xl p-6 shadow-2xl border border-slate-100 dark:border-slate-800">
               <h3 className="font-bold text-xl text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><ArrowDownCircle className="w-6 h-6 text-indigo-500" /> Record Deposit</h3>
+              
               <div className="space-y-4 mb-6">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Who deposited money?</label>
@@ -120,6 +140,7 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
                   <input type="number" value={depositAmount} onChange={e => setDepositAmount(e.target.value)} placeholder="0.00" className="w-full p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-100" />
                 </div>
               </div>
+
               <div className="flex gap-3">
                 <button onClick={() => setShowDepositModal(false)} className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold py-3 rounded-xl hover:bg-slate-200 transition-colors">Cancel</button>
                 <button onClick={handleRecordDeposit} disabled={isSaving || !depositAmount} className="flex-1 bg-indigo-600 disabled:bg-slate-400 text-white font-bold py-3 rounded-xl shadow-md active:scale-95 transition-all">
@@ -131,16 +152,25 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
         )}
       </AnimatePresence>
 
+      {/* FUND DASHBOARD */}
       <div className="bg-gradient-to-br from-indigo-600 to-indigo-900 p-6 rounded-2xl shadow-lg text-white relative overflow-hidden">
         <Landmark className="absolute -right-4 -bottom-4 w-32 h-32 text-white/10" />
         <h3 className="text-sm font-bold text-indigo-100 flex items-center gap-2 mb-4"><Landmark className="w-4 h-4 text-indigo-300" /> Central Trip Fund</h3>
+        
         <div className="mb-6">
           <p className="text-xs text-indigo-200 uppercase font-bold tracking-wider mb-1">Available Liquidity</p>
           <div className="text-4xl font-bold text-white">₹{currentLiquidity.toFixed(2)}</div>
         </div>
+
         <div className="grid grid-cols-2 gap-4">
-          <div className="bg-black/20 p-3 rounded-xl backdrop-blur-sm"><p className="text-[10px] text-indigo-200 uppercase font-bold tracking-wider mb-1">Total Collected</p><p className="text-lg font-bold">₹{totalDeposited.toFixed(0)}</p></div>
-          <div className="bg-black/20 p-3 rounded-xl backdrop-blur-sm"><p className="text-[10px] text-indigo-200 uppercase font-bold tracking-wider mb-1">Total Spent</p><p className="text-lg font-bold">₹{totalSpentFromFund.toFixed(0)}</p></div>
+          <div className="bg-black/20 p-3 rounded-xl backdrop-blur-sm">
+            <p className="text-[10px] text-indigo-200 uppercase font-bold tracking-wider mb-1">Total Collected</p>
+            <p className="text-lg font-bold">₹{totalDeposited.toFixed(0)}</p>
+          </div>
+          <div className="bg-black/20 p-3 rounded-xl backdrop-blur-sm">
+            <p className="text-[10px] text-indigo-200 uppercase font-bold tracking-wider mb-1">Total Spent</p>
+            <p className="text-lg font-bold">₹{totalSpentFromFund.toFixed(0)}</p>
+          </div>
         </div>
       </div>
 
@@ -150,13 +180,16 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
         </button>
       )}
 
+      {/* LOG OF DEPOSITS */}
       {allDeposits.length > 0 && (
         <div className="space-y-3">
           <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider pl-1 mt-4 mb-2">Deposit Ledger</h3>
           {allDeposits.map(dep => (
             <div key={dep.id} className="bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800 flex justify-between items-center transition-colors">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold"><ArrowDownCircle className="w-5 h-5" /></div>
+                <div className="w-10 h-10 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                  <ArrowDownCircle className="w-5 h-5" />
+                </div>
                 <div>
                   <span className="font-bold text-slate-800 dark:text-slate-100 block">{getMemberName(dep.paidBy)}</span>
                   <span className="text-[10px] text-slate-400 uppercase tracking-wider">{new Date(dep.date).toLocaleDateString()}</span>
@@ -165,7 +198,6 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
               <div className="flex items-center gap-3">
                 <span className="font-bold text-indigo-600 dark:text-indigo-400 text-lg">+₹{dep.amount.toFixed(2)}</span>
                 
-                {/* 🚨 NEW: DELETE DEPOSIT BUTTON (RBAC Enforced) */}
                 {canModifyFund && !group.isFundClosed && (
                   <button onClick={() => handleDeleteDeposit(dep.id, dep.amount)} className="p-1.5 text-slate-400 hover:text-red-500 active:scale-90 bg-slate-50 dark:bg-slate-800 rounded-md transition-all border-l border-slate-100 dark:border-slate-700 ml-2 pl-3">
                     <Trash2 className="w-3.5 h-3.5" />
@@ -177,13 +209,15 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
         </div>
       )}
 
+      {/* DISSOLVE FUND DANGER ZONE */}
       {group.isFundClosed ? (
-        <div className="bg-slate-100 dark:bg-slate-800/50 p-5 rounded-xl border border-slate-200 dark:border-slate-700 text-center space-y-4">
+        <div className="bg-slate-100 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 text-center space-y-4">
           <div>
             <ShieldCheck className="w-6 h-6 text-slate-400 mx-auto mb-2" />
             <h3 className="font-bold text-slate-600 dark:text-slate-300">Fund is Closed</h3>
             <p className="text-xs text-slate-500 mt-1">Remaining balances have been pushed to the Settle tab for payout.</p>
           </div>
+          
           {canModifyFund && (
             <button onClick={handleReopenFund} className="w-full bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 font-bold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm text-sm">
               <RefreshCcw className="w-4 h-4" /> Reopen Trip Fund
@@ -194,8 +228,12 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
         <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
           <div className="bg-orange-50 dark:bg-orange-900/10 p-4 rounded-xl border border-orange-200 dark:border-orange-800/50">
             <h3 className="font-bold text-orange-800 dark:text-orange-400 mb-2 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> End of Trip?</h3>
-            <p className="text-xs text-orange-700 dark:text-orange-300 mb-4 leading-relaxed">If the trip is over, dissolving the fund will calculate exactly how much of the remaining ₹{currentLiquidity.toFixed(0)} cash each person gets back as a refund.</p>
-            <button onClick={handleDissolveFund} className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold p-3 rounded-lg shadow-sm transition-all active:scale-95">Dissolve & Close Trip Fund</button>
+            <p className="text-xs text-orange-700 dark:text-orange-300 mb-4 leading-relaxed">
+              If the trip is over, dissolving the fund will calculate exactly how much of the remaining ₹{currentLiquidity.toFixed(0)} cash each person gets back as a refund.
+            </p>
+            <button onClick={handleDissolveFund} className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold p-3 rounded-lg shadow-sm transition-all active:scale-95">
+              Dissolve & Close Trip Fund
+            </button>
           </div>
         </div>
       )}

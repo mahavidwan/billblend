@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore, VIRTUAL_FUND_ID } from '../store';
-import type { SplitType, SplitItem } from '../store';
+import type { SplitType, SplitItem, Expense } from '../store';
 import { cloudSaveExpense } from '../utils/firestoreActions'; 
 import { ArrowLeft, CheckCircle2, AlertCircle, Check, Landmark, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -131,31 +131,29 @@ export default function AddExpense() {
     }
 
     try {
-      // 🚨 FIX: Generate ONE master ID for this expense
       const masterExpenseId = expenseId || crypto.randomUUID();
       
-      const payload = { 
-        id: masterExpenseId, // Pass the master ID into the payload
+      // 🚨 FIX: Fully construct the exact payload for BOTH cloud and local!
+      const payload: Expense = { 
+        id: masterExpenseId, 
         description: description.trim(), 
         amount: totalAmount, 
         paidBy, 
         splitType, 
-        splits 
+        splits,
+        date: new Date().toISOString(),
+        isSettled: false,
+        createdByEmail: cloudUser?.email || 'unknown'
       };
 
       if (group.isCollaborative && group.firebaseTripId) {
         await cloudSaveExpense(group.firebaseTripId, {
-          ...payload, 
-          date: new Date().toISOString(),
-          isSettled: false, 
-          updatedAt: Date.now(), 
-          createdByEmail: cloudUser?.email || 'unknown'
+          ...payload, updatedAt: Date.now() 
         });
       }
 
-      // Pass the exact same payload (with the master ID) to the local store
       if (expenseId) editExpense(group.id, expenseId, payload);
-      else addExpense(group.id, payload, cloudUser?.email);
+      else addExpense(group.id, payload);
       
       navigate(`/group/${group.id}`);
     } catch (err) {

@@ -19,9 +19,9 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
 
   const activeExpensesAll = group.expenses.filter(e => !e.isSettled);
   
-  // 🚨 FIX: The "Perfect Ledger" Math! 
-  // We feed just the standard group.members into the algorithm because the math 
-  // now natively ignores the Trip Fund to generate pure P2P transactions!
+  // 🚨 THE PERFECT LEDGER MATH 
+  // We feed ONLY human members into the Min-Cash Flow algorithm!
+  // This calculates pure Out-Of-Pocket debts (e.g. Sagnik owes Debanjan for a taxi).
   const p2pSettlements = calculateSettlements(group.members, activeExpensesAll);
   const rawDebts = calculateRawDebts(group.members, activeExpensesAll);
   
@@ -55,10 +55,12 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
         }
       } else {
         if (window.confirm(`Record ${selectedSettlements.size} selected settlement(s)?\n\nThis will balance their debts while keeping the remaining ones active.`)) {
+          
+          // 🚨 FIX: Generate the unified Payload with explicit IDs in the UI!
           const repaymentsToInject: Expense[] = Array.from(selectedSettlements).map(idx => {
             const s = p2pSettlements[idx];
             return {
-              id: crypto.randomUUID(),
+              id: crypto.randomUUID(), // ONE unified ID
               amount: s.amount, 
               paidBy: s.from, 
               splitType: 'ON_BEHALF' as const, 
@@ -72,9 +74,12 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
             };
           });
 
+          // 🚨 FIX: Push exact array to Cloud first!
           if (group.isCollaborative && group.firebaseTripId) {
             await cloudBulkUpdateExpenses(group.firebaseTripId, repaymentsToInject);
           }
+
+          // Push exact identical array to local store
           recordRepayments(group.id, repaymentsToInject as any);
           setActiveTab('EXPENSES');
         }
@@ -98,6 +103,7 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
   };
 
   // 🚨 CALCULATE FINAL FUND PAYOUTS (The Physical Cash Left)
+  // This calculates EXACTLY who gets the remaining cash in the bag when dissolved.
   const allDeposits = activeExpensesAll.filter(e => e.splitType === 'FUND_DEPOSIT');
   const fundExpenses = activeExpensesAll.filter(e => e.paidBy === VIRTUAL_FUND_ID);
   const currentLiquidity = allDeposits.reduce((sum, d) => sum + d.amount, 0) - fundExpenses.reduce((sum, e) => sum + e.amount, 0);
@@ -106,15 +112,20 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
   if (group.isFundClosed && currentLiquidity > 0.01) {
     const balances: Record<string, number> = {};
     group.members.forEach(m => balances[m.id] = 0);
+    
+    // We calculate Absolute Net Balances (Deposits + OOP - Consumptions)
     activeExpensesAll.forEach(exp => {
       if (exp.paidBy !== VIRTUAL_FUND_ID && balances[exp.paidBy] !== undefined) balances[exp.paidBy] += exp.amount; 
       exp.splits.forEach(s => { if (balances[s.memberId] !== undefined) balances[s.memberId] -= s.amount; });
     });
+    
+    // Because the Fund is closed, the ONLY positive balances left *should* equal the Fund Liquidity!
     Object.entries(balances).forEach(([id, amt]) => {
       if (amt >= 0.01) finalPayouts.push({ memberId: id, amount: amt });
     });
   }
 
+  // 🚨 THE MASTER ARCHIVE FUNCTION
   const handleArchiveTrip = async () => {
     if(window.confirm("Archive all expenses completely?\n\nThis marks all P2P debts and Fund Payouts as fully resolved and clears your dashboard for the next leg of the trip.")) {
       setIsProcessing(true);
@@ -152,7 +163,7 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
         </div>
       )}
 
-      {/* FINAL CASH REFUNDS (Only when Fund is Dissolved) */}
+      {/* 🚨 THE FINAL CASH REFUNDS (Only when Fund is Dissolved) */}
       {group.isFundEnabled && group.isFundClosed && finalPayouts.length > 0 && (
         <div className="space-y-3 pt-2">
           <h3 className="text-sm font-bold text-indigo-500 uppercase tracking-wider pl-1 mb-3 flex items-center gap-2">
@@ -170,7 +181,7 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
         </div>
       )}
 
-      {/* NORMAL USER TRANSFERS */}
+      {/* 🚨 NORMAL OUT-OF-POCKET TRANSFERS */}
       <div className="space-y-3">
         {p2pSettlements.length === 0 ? (
           <div className="text-center py-10 text-slate-400"><Scale className="w-12 h-12 mb-3 opacity-20 mx-auto" /><p>No out-of-pocket balances pending!</p></div>
@@ -242,13 +253,22 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
         )}
       </div>
       
+      {/* 🚨 SAFETY LOCK: You CANNOT dissolve the fund until P2P debts are settled! */}
+      {canSettle && group.isFundEnabled && !group.isFundClosed && p2pSettlements.length > 0 && (
+        <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-xl border border-orange-200 dark:border-orange-800/50 mt-6 text-center">
+          <p className="text-xs font-bold text-orange-700 dark:text-orange-400 mb-2">Fund Closure Locked</p>
+          <p className="text-xs text-orange-600 dark:text-orange-300">You must record all {p2pSettlements.length} Out-of-Pocket settlements above before you can dissolve the Trip Fund and distribute the remaining physical cash.</p>
+        </div>
+      )}
+
       {canSettle && activeExpensesAll.length > 0 && p2pSettlements.length > 0 && (
-        <button onClick={handleRecordSettlements} disabled={selectedSettlements.size === 0 || isProcessing} className="w-full bg-slate-800 dark:bg-brand-600 disabled:bg-slate-400 dark:disabled:bg-slate-800 disabled:text-slate-500 hover:bg-slate-700 dark:hover:bg-brand-500 text-white font-bold p-4 rounded-xl shadow-md transition-all active:scale-95 flex justify-center items-center gap-2">
+        <button onClick={handleRecordSettlements} disabled={selectedSettlements.size === 0 || isProcessing} className="w-full bg-slate-800 dark:bg-brand-600 disabled:bg-slate-400 dark:disabled:bg-slate-800 disabled:text-slate-500 hover:bg-slate-700 dark:hover:bg-brand-500 text-white font-bold p-4 rounded-xl shadow-md transition-all active:scale-95 flex justify-center items-center gap-2 mt-4">
           <ShieldCheck className="w-5 h-5" /> {isProcessing ? "Processing..." : (selectedSettlements.size === p2pSettlements.length && !group.isFundEnabled ? 'Record All Settlements' : `Record ${selectedSettlements.size} Settlement(s)`)}
         </button>
       )}
 
-      {canSettle && group.isFundEnabled && group.isFundClosed && (
+      {/* 🚨 MASTER ARCHIVE (Only enabled when Fund is Dissolved and P2P is settled) */}
+      {canSettle && group.isFundEnabled && group.isFundClosed && p2pSettlements.length === 0 && (
          <button onClick={handleArchiveTrip} disabled={isProcessing} className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white font-bold p-4 rounded-xl shadow-md transition-all active:scale-95 flex justify-center items-center gap-2 mt-4">
            <ShieldCheck className="w-5 h-5" /> {isProcessing ? "Archiving..." : "Archive Trip Permanently"}
          </button>
