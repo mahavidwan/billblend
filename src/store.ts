@@ -45,6 +45,9 @@ export interface AppState {
   renameGroup: (id: string, newName: string) => void;
   enableCollaboration: (groupId: string, firebaseTripId: string, expiresAt: number, adminEmail: string) => void;
   endCollaboration: (groupId: string, reasonMessage?: string) => void;
+  // 🚨 NEW: Extend Time Action
+  extendCollaboration: (groupId: string, newExpiresAt: number) => void;
+
   changeUserRole: (groupId: string, targetEmail: string, newRole: 'admin' | 'editor' | 'viewer') => void;
   
   // 🚨 NEW: Fund Toggles
@@ -119,6 +122,14 @@ export const useStore = create<AppState>()(
           const { isCollaborative, firebaseTripId, collabExpiresAt, roles, ...offlineGroup } = g;
           return { ...offlineGroup, updatedAt: Date.now(), terminationMessage: reasonMessage };
         })
+      })),
+      // 🚨 NEW: Extend Collaboration implementation
+      extendCollaboration: (groupId, newExpiresAt) => set((state) => ({
+        groups: state.groups.map(g => g.id === groupId ? {
+          ...g,
+          collabExpiresAt: newExpiresAt,
+          updatedAt: Date.now()
+        } : g)
       })),
       changeUserRole: (groupId, targetEmail, newRole) => set((state) => ({
         groups: state.groups.map(group => {
