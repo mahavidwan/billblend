@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useStore, VIRTUAL_FUND_ID } from '../../store';
-import type { Group } from '../../store';
+import type { Group, Expense } from '../../store';
 import { calculateSettlements, calculateRawDebts, getMemberLedger } from '../../utils/settlement';
+import { cloudSettleAll, cloudBulkUpdateExpenses } from '../../utils/firestoreActions'; 
 import { ArrowLeft, Scale, ShieldCheck, Zap, ChevronDown, CheckCircle2, Circle, Landmark } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Tab } from '../../pages/GroupMonitor';
@@ -14,43 +15,74 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
   const isAdmin = !group.isCollaborative || (cloudUser?.email && group.roles?.admin?.includes(cloudUser.email));
   const isEditor = group.isCollaborative && cloudUser?.email && group.roles?.editor?.includes(cloudUser.email);
   const canSettle = !group.isCollaborative || isAdmin || isEditor;
+  const [isProcessing, setIsProcessing] = useState(false); 
 
   const activeExpensesAll = group.expenses.filter(e => !e.isSettled);
   
-  // 🚨 MATHEMATICAL GENIUS: Feed ONLY humans into the algorithm!
-  // The algorithm will perfectly map out-of-pocket debts to cover Fund consumptions.
+  // 🚨 FIX: The "Perfect Ledger" Math! 
+  // We feed just the standard group.members into the algorithm because the math 
+  // now natively ignores the Trip Fund to generate pure P2P transactions!
   const p2pSettlements = calculateSettlements(group.members, activeExpensesAll);
   const rawDebts = calculateRawDebts(group.members, activeExpensesAll);
   
-  const getMemberName = (memberId: string) => group.members.find(m => m.id === memberId)?.name || 'Unknown';
+  const getMemberName = (memberId: string) => {
+    if (memberId === VIRTUAL_FUND_ID) return 'Trip Fund 🏦';
+    return group.members.find(m => m.id === memberId)?.name || 'Unknown';
+  };
 
   const [expandedSettleIdx, setExpandedSettleIdx] = useState<number | null>(null);
   const [selectedSettlements, setSelectedSettlements] = useState<Set<number>>(new Set());
 
+  // Auto-select all out-of-pocket transfers by default
   useEffect(() => { 
-    setSelectedSettlements(new Set(p2pSettlements.map((_, i) => i))); 
+    const indices = new Set<number>();
+    p2pSettlements.forEach((_, i) => indices.add(i));
+    setSelectedSettlements(indices); 
   }, [p2pSettlements.length]);
 
-  const handleRecordSettlements = () => {
-    if (selectedSettlements.size === 0) return;
+  const handleRecordSettlements = async () => {
+    if (selectedSettlements.size === 0 || isProcessing) return;
+    setIsProcessing(true);
     
-    if (selectedSettlements.size === p2pSettlements.length && !group.isFundEnabled) {
-      if (window.confirm("Record all settlements and move active expenses to history?")) {
-        settleAllExpenses(group.id);
-        setActiveTab('EXPENSES');
+    try {
+      if (selectedSettlements.size === p2pSettlements.length && !group.isFundEnabled) {
+        if (window.confirm("Record all settlements and move active expenses to history?")) {
+          if (group.isCollaborative && group.firebaseTripId) {
+            await cloudSettleAll(group.firebaseTripId, activeExpensesAll);
+          }
+          settleAllExpenses(group.id);
+          setActiveTab('EXPENSES');
+        }
+      } else {
+        if (window.confirm(`Record ${selectedSettlements.size} selected settlement(s)?\n\nThis will balance their debts while keeping the remaining ones active.`)) {
+          const repaymentsToInject: Expense[] = Array.from(selectedSettlements).map(idx => {
+            const s = p2pSettlements[idx];
+            return {
+              id: crypto.randomUUID(),
+              amount: s.amount, 
+              paidBy: s.from, 
+              splitType: 'ON_BEHALF' as const, 
+              splits: [{ memberId: s.to, amount: s.amount }],
+              description: `Repayment: ${getMemberName(s.from)} paid ${getMemberName(s.to)}`, 
+              isSystemRepayment: true, 
+              createdByEmail: cloudUser?.email || 'unknown',
+              date: new Date().toISOString(),
+              isSettled: false,
+              updatedAt: Date.now()
+            };
+          });
+
+          if (group.isCollaborative && group.firebaseTripId) {
+            await cloudBulkUpdateExpenses(group.firebaseTripId, repaymentsToInject);
+          }
+          recordRepayments(group.id, repaymentsToInject as any);
+          setActiveTab('EXPENSES');
+        }
       }
-    } else {
-      if (window.confirm(`Record ${selectedSettlements.size} selected settlement(s)?\n\nThis will balance their debts while keeping the remaining ones active.`)) {
-        const repaymentsToInject = Array.from(selectedSettlements).map(idx => {
-          const s = p2pSettlements[idx];
-          return {
-            amount: s.amount, paidBy: s.from, splitType: 'ON_BEHALF' as const, splits: [{ memberId: s.to, amount: s.amount }],
-            description: `Repayment: ${getMemberName(s.from)} paid ${getMemberName(s.to)}`, isSystemRepayment: true, createdByEmail: cloudUser?.email || 'unknown'
-          };
-        });
-        recordRepayments(group.id, repaymentsToInject);
-        setActiveTab('EXPENSES');
-      }
+    } catch (err) {
+      alert("Failed to sync settlements to cloud. Check internet connection.");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -66,13 +98,10 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
   };
 
   // 🚨 CALCULATE FINAL FUND PAYOUTS (The Physical Cash Left)
-  // When a fund is dissolved, all P2P debts must be settled first. The remaining positive balances
-  // of the members perfectly equals the physical cash left in the Fund bag.
   const allDeposits = activeExpensesAll.filter(e => e.splitType === 'FUND_DEPOSIT');
   const fundExpenses = activeExpensesAll.filter(e => e.paidBy === VIRTUAL_FUND_ID);
   const currentLiquidity = allDeposits.reduce((sum, d) => sum + d.amount, 0) - fundExpenses.reduce((sum, e) => sum + e.amount, 0);
   
-  // Who gets the remaining cash?
   const finalPayouts: { memberId: string; amount: number }[] = [];
   if (group.isFundClosed && currentLiquidity > 0.01) {
     const balances: Record<string, number> = {};
@@ -81,11 +110,27 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
       if (exp.paidBy !== VIRTUAL_FUND_ID && balances[exp.paidBy] !== undefined) balances[exp.paidBy] += exp.amount; 
       exp.splits.forEach(s => { if (balances[s.memberId] !== undefined) balances[s.memberId] -= s.amount; });
     });
-    // Anyone with a positive balance after all P2P settlements gets the physical cash!
     Object.entries(balances).forEach(([id, amt]) => {
       if (amt >= 0.01) finalPayouts.push({ memberId: id, amount: amt });
     });
   }
+
+  const handleArchiveTrip = async () => {
+    if(window.confirm("Archive all expenses completely?\n\nThis marks all P2P debts and Fund Payouts as fully resolved and clears your dashboard for the next leg of the trip.")) {
+      setIsProcessing(true);
+      try {
+        if (group.isCollaborative && group.firebaseTripId) {
+          await cloudSettleAll(group.firebaseTripId, activeExpensesAll);
+        }
+        settleAllExpenses(group.id);
+        setActiveTab('EXPENSES');
+      } catch (err) {
+        alert("Failed to archive on cloud. Try again.");
+      } finally {
+        setIsProcessing(false);
+      }
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -107,7 +152,7 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
         </div>
       )}
 
-      {/* 🚨 THE FINAL CASH REFUNDS (Only when Fund is Dissolved) */}
+      {/* FINAL CASH REFUNDS (Only when Fund is Dissolved) */}
       {group.isFundEnabled && group.isFundClosed && finalPayouts.length > 0 && (
         <div className="space-y-3 pt-2">
           <h3 className="text-sm font-bold text-indigo-500 uppercase tracking-wider pl-1 mb-3 flex items-center gap-2">
@@ -198,15 +243,14 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
       </div>
       
       {canSettle && activeExpensesAll.length > 0 && p2pSettlements.length > 0 && (
-        <button onClick={handleRecordSettlements} disabled={selectedSettlements.size === 0} className="w-full bg-slate-800 dark:bg-brand-600 disabled:bg-slate-400 dark:disabled:bg-slate-800 disabled:text-slate-500 hover:bg-slate-700 dark:hover:bg-brand-500 text-white font-bold p-4 rounded-xl shadow-md transition-all active:scale-95 flex justify-center items-center gap-2">
-          <ShieldCheck className="w-5 h-5" /> {selectedSettlements.size === p2pSettlements.length && !group.isFundEnabled ? 'Record All Settlements' : `Record ${selectedSettlements.size} Settlement(s)`}
+        <button onClick={handleRecordSettlements} disabled={selectedSettlements.size === 0 || isProcessing} className="w-full bg-slate-800 dark:bg-brand-600 disabled:bg-slate-400 dark:disabled:bg-slate-800 disabled:text-slate-500 hover:bg-slate-700 dark:hover:bg-brand-500 text-white font-bold p-4 rounded-xl shadow-md transition-all active:scale-95 flex justify-center items-center gap-2">
+          <ShieldCheck className="w-5 h-5" /> {isProcessing ? "Processing..." : (selectedSettlements.size === p2pSettlements.length && !group.isFundEnabled ? 'Record All Settlements' : `Record ${selectedSettlements.size} Settlement(s)`)}
         </button>
       )}
 
-      {/* 🚨 ARCHIVE TRIP (Closes the book on everything!) */}
       {canSettle && group.isFundEnabled && group.isFundClosed && (
-         <button onClick={() => { if(window.confirm("Archive all expenses completely?\n\nThis marks all P2P debts and Fund Payouts as fully resolved and clears your dashboard for the next leg of the trip.")) { settleAllExpenses(group.id); setActiveTab('EXPENSES'); } }} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold p-4 rounded-xl shadow-md transition-all active:scale-95 flex justify-center items-center gap-2 mt-4">
-           <ShieldCheck className="w-5 h-5" /> Archive Trip Permanently
+         <button onClick={handleArchiveTrip} disabled={isProcessing} className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white font-bold p-4 rounded-xl shadow-md transition-all active:scale-95 flex justify-center items-center gap-2 mt-4">
+           <ShieldCheck className="w-5 h-5" /> {isProcessing ? "Archiving..." : "Archive Trip Permanently"}
          </button>
       )}
     </div>

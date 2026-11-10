@@ -131,16 +131,29 @@ export default function AddExpense() {
     }
 
     try {
-      const activeExpenseId = expenseId || crypto.randomUUID();
-      const payload = { description: description.trim(), amount: totalAmount, paidBy, splitType, splits };
+      // 🚨 FIX: Generate ONE master ID for this expense
+      const masterExpenseId = expenseId || crypto.randomUUID();
+      
+      const payload = { 
+        id: masterExpenseId, // Pass the master ID into the payload
+        description: description.trim(), 
+        amount: totalAmount, 
+        paidBy, 
+        splitType, 
+        splits 
+      };
 
       if (group.isCollaborative && group.firebaseTripId) {
         await cloudSaveExpense(group.firebaseTripId, {
-          ...payload, id: activeExpenseId, date: new Date().toISOString(),
-          isSettled: false, updatedAt: Date.now(), createdByEmail: cloudUser?.email || 'unknown'
+          ...payload, 
+          date: new Date().toISOString(),
+          isSettled: false, 
+          updatedAt: Date.now(), 
+          createdByEmail: cloudUser?.email || 'unknown'
         });
       }
 
+      // Pass the exact same payload (with the master ID) to the local store
       if (expenseId) editExpense(group.id, expenseId, payload);
       else addExpense(group.id, payload, cloudUser?.email);
       

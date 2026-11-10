@@ -51,7 +51,8 @@ export interface AppState {
   toggleFundFeature: (groupId: string, isEnabled: boolean) => void;
   toggleFundClosure: (groupId: string, isClosed: boolean) => void;
 
-  addExpense: (groupId: string, expense: Omit<Expense, 'id' | 'date' | 'updatedAt' | 'createdByEmail'>, creatorEmail?: string) => void;
+  // 🚨 FIX: Now explicitly requires the 'id' parameter!
+  addExpense: (groupId: string, expense: Omit<Expense, 'date' | 'updatedAt' | 'createdByEmail'>, creatorEmail?: string) => void;  
   deleteExpense: (groupId: string, expenseId: string) => void;
   editExpense: (groupId: string, expenseId: string, updatedData: Omit<Expense, 'id' | 'date' | 'updatedAt'>) => void;
   settleAllExpenses: (groupId: string) => void;
@@ -136,7 +137,20 @@ export const useStore = create<AppState>()(
       toggleFundFeature: (groupId, isEnabled) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, isFundEnabled: isEnabled, updatedAt: Date.now() } : g) })),
       toggleFundClosure: (groupId, isClosed) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, isFundClosed: isClosed, updatedAt: Date.now() } : g) })),
 
-      addExpense: (groupId, newExpenseData, creatorEmail) => set((state) => ({ groups: state.groups.map((group) => { if (group.id !== groupId) return group; const newExpense: Expense = { ...newExpenseData, id: crypto.randomUUID(), date: new Date().toISOString(), isSettled: false, updatedAt: Date.now(), createdByEmail: creatorEmail }; return { ...group, updatedAt: Date.now(), expenses: [newExpense, ...group.expenses] }; }), })),
+      // 🚨 FIX: Accepts the unified ID from the UI to prevent double-counting via WebSockets
+      addExpense: (groupId, newExpenseData, creatorEmail) => set((state) => ({
+        groups: state.groups.map((group) => {
+          if (group.id !== groupId) return group;
+          const newExpense: Expense = { 
+            ...newExpenseData, 
+            date: new Date().toISOString(), 
+            isSettled: false, 
+            updatedAt: Date.now(), 
+            createdByEmail: creatorEmail 
+          };
+          return { ...group, updatedAt: Date.now(), expenses: [newExpense, ...group.expenses] };
+        }),
+      })),
       deleteExpense: (groupId, expenseId) => set((state) => ({ groups: state.groups.map((g) => g.id === groupId ? { ...g, updatedAt: Date.now(), expenses: g.expenses.filter((e) => e.id !== expenseId) } : g), deletedExpenses: [...state.deletedExpenses, { id: expenseId, deletedAt: Date.now() }] })),
       editExpense: (groupId, expenseId, updatedData) => set((state) => ({ groups: state.groups.map((g) => { if (g.id !== groupId) return g; return { ...g, updatedAt: Date.now(), expenses: g.expenses.map((e) => e.id === expenseId ? { ...e, ...updatedData, updatedAt: Date.now() } : e) }; }) })),
       settleAllExpenses: (groupId) => set((state) => ({ groups: state.groups.map((g) => { if (g.id !== groupId) return g; return { ...g, updatedAt: Date.now(), expenses: g.expenses.map((e) => ({ ...e, isSettled: true, updatedAt: Date.now() })) }; }) })),
