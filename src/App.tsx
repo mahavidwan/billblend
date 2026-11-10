@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
-// 🚨 FIX: Ensure BrowserRouter is imported as Router and USED!
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { WalletCards, Sun, Moon, Monitor, User, AlertTriangle } from 'lucide-react';
 import { useStore } from './store';
-// 🚨 FIX: Explicitly importing useGoogleLogin
-import { GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import { triggerGlobalSync } from './utils/cloudSync';
 import { GlobalLiveSyncManager } from './utils/useLiveSync'; 
+import { useAuth } from './utils/useAuth'; // 🚨 NEW HOOK
 import ReactGA from "react-ga4";
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -66,52 +65,14 @@ function ThemeManager() {
   return null;
 }
 
-// --- THE MAIN APP SHELL ---
 function AppShell() {
   const theme = useStore(state => state.theme);
   const setTheme = useStore(state => state.setTheme);
   const cloudUser = useStore(state => state.cloudUser);
-  const setCloudUser = useStore(state => state.setCloudUser);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Helper to process successful Google Logins (used by both buttons)
-  const handleLoginSuccess = async (tokenResponse: any) => {
-    const grantedScopes = tokenResponse.scope || '';
-    if (!grantedScopes.includes('drive.appdata')) {
-      alert("Permission Denied: You must check the box to allow access to your Google Drive AppData folder.");
-      return;
-    }
-    try {
-      const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
-      });
-      const userInfo = await userInfoRes.json();
-      
-      setCloudUser({
-        name: userInfo.name, email: userInfo.email, picture: userInfo.picture,
-        accessToken: tokenResponse.access_token,
-        tokenExpiry: Date.now() + (tokenResponse.expires_in * 1000),
-      });
-      triggerGlobalSync(); // Instantly resume auto-sync
-    } catch (err) { alert("Failed to fetch Google Profile."); }
-  };
-
-  // 1. Silent JIT Login (Skips selector if email is known)
-  const login = useGoogleLogin({
-    scope: 'openid profile email https://www.googleapis.com/auth/drive.appdata',
-    // @ts-ignore
-    login_hint: cloudUser?.email, 
-    onSuccess: handleLoginSuccess,
-    onError: () => alert("Google Login Failed.")
-  });
-
-  // 2. 🚨 NEW: Switch Account Login (Forces Google Account Chooser)
-  const switchAccount = useGoogleLogin({
-    scope: 'openid profile email https://www.googleapis.com/auth/drive.appdata',
-    prompt: 'select_account', // This tells Google to ALWAYS show the account picker!
-    onSuccess: handleLoginSuccess,
-    onError: () => alert("Account switch canceled.")
-  });
+  // 🚨 IMPORT LOGIN LOGIC FROM HOOK
+  const { login } = useAuth();
 
   const cycleTheme = () => {
     if (theme === 'light') setTheme('dark');
@@ -128,8 +89,7 @@ function AppShell() {
       <GlobalLiveSyncManager />
       <RouteTracker /> 
       
-      {/* 🚨 Pass both login methods to the Sidebar */}
-      <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} onLogin={login} onSwitchAccount={switchAccount} />
+      <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       <div className="min-h-screen bg-slate-200 dark:bg-black flex justify-center font-sans transition-colors duration-300">
         <div className="w-full max-w-md bg-slate-50 dark:bg-slate-950 min-h-screen shadow-2xl relative overflow-x-hidden flex flex-col transition-colors duration-300">
@@ -187,7 +147,6 @@ function AppShell() {
   );
 }
 
-// 🚨 WRAP THE APP IN ROUTER AND PROVIDER HERE
 export default function App() {
   return (
     <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>

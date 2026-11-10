@@ -6,6 +6,20 @@ import { useStore } from '../store';
 import type { Group, Expense } from '../store';
 import { Cloud, AlertCircle, Users, Zap, CheckCircle2 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useAuth } from '../utils/useAuth'; // 🚨 SINGLE SOURCE OF TRUTH
+
+// 🚨 NEW: Auto-Sequencer for Duplicate Names
+function generateUniqueName(baseName: string, existingNames: string[]): string {
+  let uniqueName = baseName;
+  let counter = 2;
+  const lowerNames = existingNames.map(n => n.toLowerCase());
+  
+  while (lowerNames.includes(uniqueName.toLowerCase())) {
+    uniqueName = `${baseName} (${counter})`;
+    counter++;
+  }
+  return uniqueName;
+}
 
 export default function JoinTrip() {
   const { tripId } = useParams<{ tripId: string }>();
@@ -13,6 +27,7 @@ export default function JoinTrip() {
   
   const cloudUser = useStore(state => state.cloudUser);
   const importGroup = useStore(state => state.importGroup);
+  const { login, isLoggingIn } = useAuth(); // 🚨 NEW
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -21,10 +36,7 @@ export default function JoinTrip() {
 
   useEffect(() => {
     const existingGroup = useStore.getState().groups.find(g => g.firebaseTripId === tripId);
-    if (existingGroup) {
-      navigate(`/group/${existingGroup.id}`, { replace: true });
-      return;
-    }
+    if (existingGroup) { navigate(`/group/${existingGroup.id}`, { replace: true }); return; }
 
     async function fetchTripDetails() {
       if (!tripId) return;
@@ -34,9 +46,8 @@ export default function JoinTrip() {
         if (!tripSnap.exists()) { setError("Live trip not found."); setLoading(false); return; }
 
         const data = tripSnap.data();
-        if (data.expiresAt && data.expiresAt.toMillis() < Date.now()) {
-          setError("This collaboration session has expired."); setLoading(false); return;
-        }
+        if (data.expiresAt && data.expiresAt.toMillis() < Date.now()) { setError("This collaboration session has expired."); setLoading(false); return; }
+        
         setTripPreview({ name: data.name, membersCount: data.members.length, expiresAt: data.expiresAt.toMillis(), admin: data.roles?.admin?.[0] || 'Unknown', rawMembers: data.members, createdAt: data.createdAt });
       } catch (err) { setError("Failed to connect to the secure server."); } finally { setLoading(false); }
     }
@@ -44,22 +55,22 @@ export default function JoinTrip() {
   }, [tripId, navigate]);
 
   const handleJoin = async () => {
-    if (!cloudUser) { alert("Please connect your Google account in the sidebar first."); return; }
-    if (!tripId || !tripPreview) return;
-
+    if (!cloudUser || !tripId || !tripPreview) return;
     try {
       setJoining(true);
-      
       const tripRef = doc(db, 'trips', tripId);
-      const newMember = { id: crypto.randomUUID(), name: cloudUser.name, email: cloudUser.email };
       
-      // 🚨 FIX: Force update the timestamp so the Admin's WebSocket fires!
+      // 🚨 FIX: Auto-Sequencer (e.g. "Debanjan Sarkar (2)")
+      const existingNames = tripPreview.rawMembers.map((m: any) => m.name);
+      const safeUniqueName = generateUniqueName(cloudUser.name, existingNames);
+      
+      const newMember = { id: crypto.randomUUID(), name: safeUniqueName, email: cloudUser.email };
       const timeNow = Date.now();
       
       await updateDoc(tripRef, {
         members: arrayUnion(newMember),
         'roles.viewer': arrayUnion(cloudUser.email),
-        updatedAt: timeNow // <-- The crucial ping!
+        updatedAt: timeNow 
       });
       
       const expensesRef = collection(db, `trips/${tripId}/expenses`);
@@ -78,9 +89,7 @@ export default function JoinTrip() {
       navigate(`/group/${newGroup.id}`, { replace: true });
       
     } catch (err) {
-      console.error(err);
-      alert("Failed to join trip.");
-      setJoining(false);
+      console.error(err); alert("Failed to join trip."); setJoining(false);
     }
   };
 
@@ -93,21 +102,28 @@ export default function JoinTrip() {
         <div className="bg-brand-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6 relative">
           <Cloud className="w-8 h-8 text-brand-600" /><Zap className="w-4 h-4 text-accent-500 absolute bottom-0 right-0" />
         </div>
-        <h2 className="text-2xl font-bold mb-2">Live Trip Invite!</h2>
+        <h2 className="text-2xl font-bold mb-2 text-slate-800 dark:text-slate-100">Live Trip Invite!</h2>
+        <p className="text-slate-500 dark:text-slate-400 mb-6 text-sm">You have been invited to collaborate in real-time.</p>
         
-        <div className="bg-slate-50 p-5 rounded-2xl text-left mb-8 border border-slate-100">
-          <h3 className="font-bold text-xl text-brand-700 mb-3">{tripPreview.name}</h3>
+        <div className="bg-slate-50 dark:bg-slate-950 p-5 rounded-2xl text-left mb-8 border border-slate-100 dark:border-slate-800">
+          <h3 className="font-bold text-xl text-brand-700 dark:text-brand-400 mb-3">{tripPreview.name}</h3>
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm"><Users className="w-4 h-4" /><span>{tripPreview.membersCount} Members</span></div>
-            <div className="flex items-center gap-2 text-sm"><CheckCircle2 className="w-4 h-4 text-accent-500" /><span className="truncate">Admin: {tripPreview.admin}</span></div>
+            <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400"><Users className="w-4 h-4" /><span>{tripPreview.membersCount} Members</span></div>
+            <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400"><CheckCircle2 className="w-4 h-4 text-accent-500" /><span className="truncate">Admin: {tripPreview.admin}</span></div>
           </div>
         </div>
 
+        {/* 🚨 SEAMLESS ONBOARDING */}
         {!cloudUser ? (
-          <div className="bg-orange-50 text-orange-700 p-4 rounded-xl text-sm font-medium mb-4">Connect Google Account in sidebar to join.</div>
+          <div className="space-y-4">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Step 1: Authenticate</p>
+            <button onClick={() => login()} disabled={isLoggingIn} className="w-full bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 text-white font-bold text-lg py-4 rounded-xl shadow-md active:scale-95 transition-all flex items-center justify-center gap-2">
+              <Cloud className="w-5 h-5" /> {isLoggingIn ? 'Connecting...' : 'Secure Google Login'}
+            </button>
+          </div>
         ) : (
-          <button onClick={handleJoin} disabled={joining} className="w-full bg-accent-500 hover:bg-accent-600 text-white font-bold text-lg py-4 rounded-xl shadow-md active:scale-95 transition-all mb-4 flex items-center justify-center gap-2">
-            {joining ? "Joining..." : `Join as ${cloudUser.name}`}
+          <button onClick={handleJoin} disabled={joining} className="w-full bg-accent-500 hover:bg-accent-600 text-white font-bold text-lg py-4 rounded-xl shadow-md active:scale-95 transition-all flex items-center justify-center gap-2">
+            {joining ? "Downloading Data..." : `Join as ${cloudUser.name}`}
           </button>
         )}
       </div>
