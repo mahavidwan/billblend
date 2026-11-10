@@ -85,7 +85,11 @@ export default function GroupSettings() {
         
         const updatedGroup = useStore.getState().groups.find(g => g.id === group.id);
         if (updatedGroup) await cloudUpdateGroup(firebaseTripId, { members: updatedGroup.members, roles: updatedGroup.roles });
-      } catch (err) { alert("Failed to create live trip. Check internet connection."); } 
+      } catch (err: any) { 
+        // 🚨 FIX: Now we show the EXACT error message from Firebase so you know if it's network, permissions, or missing keys!
+        console.error("Firebase Collab Error:", err);
+        alert(`Failed to create live trip.\n\nReason: ${err.message || 'Network disconnected'}`); 
+      } 
       finally { setIsEnablingCollab(false); }
     }
   };
