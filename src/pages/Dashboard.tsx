@@ -167,7 +167,7 @@ export default function Dashboard() {
           <span className="font-bold text-slate-600 dark:text-slate-400 tracking-wide transition-colors">Debanjan Sarkar</span>
         </p>
         <div className="bg-slate-200/70 dark:bg-slate-800/80 text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-md transition-colors">
-          Version 7.2.2
+          Version 7.2.3
         </div>
       </div>
     </div>

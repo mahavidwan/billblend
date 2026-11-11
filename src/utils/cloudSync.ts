@@ -17,7 +17,7 @@ async function executeCloudSync(localState: AppState, token: string) {
   const exportData = { groups: localState.groups, deletedGroups: localState.deletedGroups, deletedExpenses: localState.deletedExpenses };
 
   if (!fileId) {
-    // First time syncing! Upload local data as the master backup.
+    // First time syncing to GDrive! Upload local data as the master backup.
     await uploadBackup(token, exportData, null);
     return exportData;
   }
@@ -37,9 +37,24 @@ async function executeCloudSync(localState: AppState, token: string) {
 
   for (const gId of allGroupIds) {
     if (deletedGroupIds.has(gId)) continue; 
+    
     const localG = localState.groups.find(g => g.id === gId);
     const remoteG = remoteGroups.find(g => g.id === gId);
 
+    // 🚨 THE FIX: FIREBASE DICTATORSHIP
+    // If the group is actively collaborating via Firebase, the local state (managed by WebSockets) 
+    // is the absolute truth. We completely bypass the GDrive merge logic to prevent Zombie resurrections!
+    if (localG && localG.isCollaborative) {
+      mergedGroups.push(localG);
+      continue; // Skip all LWW merging for this live trip
+    }
+    if (remoteG && remoteG.isCollaborative && !localG) {
+      // Edge case: A live trip exists in GDrive backup but was deleted locally. 
+      // Because we want strict control, we respect the local deletion and do not resurrect it.
+      continue; 
+    }
+
+    // --- STANDARD OFFLINE TRIP LWW MERGE LOGIC ---
     if (localG && !remoteG) { mergedGroups.push(localG); continue; }
     if (!localG && remoteG) { mergedGroups.push(remoteG); continue; }
     if (localG && remoteG) {
@@ -74,7 +89,7 @@ async function executeCloudSync(localState: AppState, token: string) {
     deletedExpenses: mergedDelExpenses
   };
 
-  // Upload the perfectly merged state back to Google Drive
+  // Upload the perfectly resolved state back to Google Drive
   await uploadBackup(token, finalMergedData, fileId);
   return finalMergedData;
 }
@@ -108,7 +123,7 @@ export async function triggerGlobalSync(): Promise<{ success: boolean; error?: s
       return { success: false, error: 'SESSION_EXPIRED' };
     }
     
-    // Return the actual Google Error to the UI (e.g. "Google Error: Drive API not enabled")
+    // Return the actual Google Error to the UI
     return { success: false, error: err.message || 'Network error or Drive inaccessible' };
   }
 }
