@@ -39,6 +39,7 @@ export interface AppState {
   deleteGroup: (id: string) => void;
   togglePinGroup: (id: string) => void;
   renameGroup: (id: string, newName: string) => void;
+  renameMember: (groupId: string, memberId: string, newName: string) => void;
   enableCollaboration: (groupId: string, firebaseTripId: string, expiresAt: number, adminEmail: string) => void;
   endCollaboration: (groupId: string, reasonMessage?: string) => void;
   extendCollaboration: (groupId: string, newExpiresAt: number) => void;
@@ -94,6 +95,16 @@ export const useStore = create<AppState>()(
       deleteGroup: (id) => set((state) => ({ groups: state.groups.filter((g) => g.id !== id), deletedGroups: [...state.deletedGroups, { id, deletedAt: Date.now() }] })),
       togglePinGroup: (id) => set((state) => ({ groups: state.groups.map((g) => g.id === id ? { ...g, isPinned: !g.isPinned, updatedAt: Date.now() } : g) })),
       renameGroup: (id, newName) => set((state) => ({ groups: state.groups.map((g) => g.id === id ? { ...g, name: newName, updatedAt: Date.now() } : g) })),
+      renameMember: (groupId, memberId, newName) => set((state) => ({
+        groups: state.groups.map(g => {
+          if (g.id !== groupId) return g;
+          return {
+            ...g,
+            updatedAt: Date.now(),
+            members: g.members.map(m => m.id === memberId ? { ...m, name: newName } : m)
+          };
+        })
+      })),
       enableCollaboration: (groupId, firebaseTripId, expiresAt, adminEmail) => set((state) => {
         const cloudUser = state.cloudUser;
         return {

@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
+import { isValidName, isDuplicateName, formatName } from '../utils/validation'; 
 import { exportGroupToJSON } from '../utils/export';
 import { createLiveTripInFirestore } from '../utils/collabSync';
-import { cloudExecuteMerge, cloudUpdateGroup, cloudEndCollaboration } from '../utils/firestoreActions';
-// 🚨 FIX: All imports are now perfectly aligned and used!
-import { ArrowLeft, UserPlus, Trash2, ShieldAlert, FileJson, Edit2, Check, PenLine, Globe, Zap, Link as LinkIcon, Clock, Merge, Lock, ServerOff, Landmark, CalendarClock, ShieldCheck } from 'lucide-react';
+import { cloudBulkUpdateExpenses, cloudUpdateGroup, cloudEndCollaboration } from '../utils/firestoreActions';
+import { ArrowLeft, UserPlus, Trash2, ShieldAlert, FileJson, Edit2, Check, PenLine, Globe, Zap, Link as LinkIcon, Clock, Merge, Lock, ShieldCheck, ServerOff, Landmark, CalendarClock, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 function formatExpiryDate(ms: number | undefined) {
@@ -26,6 +26,7 @@ export default function GroupSettings() {
   const addMember = useStore(state => state.addMember);
   const removeMember = useStore(state => state.removeMember);
   const renameGroup = useStore(state => state.renameGroup);
+  const renameMember = useStore(state => state.renameMember); // 🚨 Needed for Edit Pencil
   const enableCollaboration = useStore(state => state.enableCollaboration);
   const endCollaboration = useStore(state => state.endCollaboration);
   const extendCollaboration = useStore(state => state.extendCollaboration);
@@ -48,6 +49,10 @@ export default function GroupSettings() {
   const [mergeGhostId, setMergeGhostId] = useState('');
   const [mergeTargetId, setMergeTargetId] = useState('');
   const [isMerging, setIsMerging] = useState(false);
+  
+  // 🚨 FIX 3: RESTORED INLINE EDIT STATE
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [editingMemberName, setEditingMemberName] = useState('');
 
   if (!group) return null;
 
@@ -64,13 +69,34 @@ export default function GroupSettings() {
   };
 
   const handleAddMember = async () => {
-    const safeName = newMemberName.trim();
-    if (safeName) {
-      addMember(group.id, safeName); setNewMemberName('');
-      if (group.isCollaborative && group.firebaseTripId) {
-        const latestGroup = useStore.getState().groups.find(g => g.id === group.id);
-        if (latestGroup) await cloudUpdateGroup(group.firebaseTripId, { members: latestGroup.members });
-      }
+    const cleanName = formatName(newMemberName);
+    if (!isValidName(cleanName)) { alert("Name must have at least 3 letters/numbers."); return; }
+    
+    const existingNames = group.members.map(m => m.name);
+    if (isDuplicateName(cleanName, existingNames)) { alert("This name already exists! Choose a unique name."); return; }
+
+    addMember(group.id, cleanName); setNewMemberName('');
+    
+    if (group.isCollaborative && group.firebaseTripId) {
+      const latestGroup = useStore.getState().groups.find(g => g.id === group.id);
+      if (latestGroup) await cloudUpdateGroup(group.firebaseTripId, { members: latestGroup.members });
+    }
+  };
+
+  // 🚨 RESTORED EDIT PENCIL FUNCTION
+  const handleRenameMemberSave = async (memberId: string) => {
+    const cleanName = formatName(editingMemberName);
+    if (!isValidName(cleanName)) { alert("Name must have at least 3 letters/numbers."); return; }
+    
+    const otherNames = group.members.filter(m => m.id !== memberId).map(m => m.name);
+    if (isDuplicateName(cleanName, otherNames)) { alert("This name is already used by someone else!"); return; }
+
+    renameMember(group.id, memberId, cleanName);
+    setEditingMemberId(null);
+
+    if (group.isCollaborative && group.firebaseTripId) {
+      const latestGroup = useStore.getState().groups.find(g => g.id === group.id);
+      if (latestGroup) await cloudUpdateGroup(group.firebaseTripId, { members: latestGroup.members });
     }
   };
   
@@ -147,23 +173,16 @@ export default function GroupSettings() {
 
     if (window.confirm(`Merge all expenses from "${ghostName}" into "${targetName}"?\n\n"${ghostName}" will be permanently deleted.`)) {
       setIsMerging(true);
-      
-      // 1. Execute mathematically perfect merge locally
       mergeMembers(group.id, mergeGhostId, mergeTargetId);
-      
       const updatedGroup = useStore.getState().groups.find(g => g.id === group.id);
       
       if (updatedGroup && updatedGroup.isCollaborative && updatedGroup.firebaseTripId) {
         try {
-          // Find only the expenses that were touched by the merge
           const recentlyModified = updatedGroup.expenses.filter(e => (Date.now() - (e.updatedAt || 0)) < 5000);
-          
-          // 🚨 FIX: Execute the TRUE Atomic Merge! (No network drop corruption!)
-          await cloudExecuteMerge(updatedGroup.firebaseTripId, updatedGroup.members, recentlyModified);
-          
-        } catch (err) { alert("Merge succeeded locally, but failed to sync to cloud. It will auto-sync later."); }
+          if (recentlyModified.length > 0) await cloudBulkUpdateExpenses(updatedGroup.firebaseTripId, recentlyModified);
+          await cloudUpdateGroup(updatedGroup.firebaseTripId, { members: updatedGroup.members });
+        } catch (err) { alert("Merge succeeded locally, but failed to sync to cloud."); }
       }
-      
       setIsMerging(false); setShowMergeModal(false); setMergeGhostId(''); setMergeTargetId(''); alert("Merge complete!");
     }
   };
@@ -248,7 +267,7 @@ export default function GroupSettings() {
             <h3 className={`font-bold flex items-center gap-2 ${group.isCollaborative ? 'text-white' : 'text-slate-800 dark:text-slate-200'}`}>
               {group.isCollaborative ? <Zap className="w-5 h-5 text-accent-400" /> : <Globe className="w-5 h-5 text-brand-500" />} Real-Time Sync
             </h3>
-            {group.isCollaborative && <span className="bg-accent-500 text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider shadow-md">Live</span>}
+            {group.isCollaborative && <span className="bg-accent-500 text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider animate-pulse shadow-md">Live</span>}
           </div>
           
           <p className={`text-xs mb-4 leading-relaxed ${group.isCollaborative ? 'text-brand-100' : 'text-slate-500 dark:text-slate-400'}`}>
@@ -317,6 +336,7 @@ export default function GroupSettings() {
                 Allow members to deposit money upfront into a central "Trip Fund" to pay for common expenses, rather than paying out of pocket each time.
               </p>
             </div>
+            
             <div onClick={handleToggleFund} className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ${group.isFundEnabled ? 'bg-indigo-500' : 'bg-slate-300 dark:bg-slate-700'}`}>
               <motion.div className="bg-white w-4 h-4 rounded-full shadow-sm" animate={{ x: group.isFundEnabled ? 24 : 0 }} transition={{ type: "spring", stiffness: 500, damping: 30 }} />
             </div>
@@ -356,7 +376,7 @@ export default function GroupSettings() {
           <div className="flex justify-between items-end mb-4">
             <div>
               <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-1 transition-colors">Manage Members</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 transition-colors max-w-[200px]">Manage roles, remove members, or merge a ghost profile.</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 transition-colors max-w-[200px]">Manage roles, rename members, or merge a ghost profile.</p>
             </div>
             <button onClick={() => setShowMergeModal(true)} disabled={group.members.length < 2} className="bg-brand-50 dark:bg-brand-900/20 text-brand-600 dark:text-brand-400 disabled:opacity-50 px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border border-brand-200 dark:border-brand-800/50 hover:bg-brand-100 transition-colors active:scale-95">
               <Merge className="w-4 h-4" /> Merge
@@ -366,6 +386,7 @@ export default function GroupSettings() {
           <div className="space-y-3">
             {group.members.map((member) => {
               const isEngaged = group.expenses.some(exp => exp.paidBy === member.id || exp.splits.some(s => s.memberId === member.id));
+              const isEditingThis = editingMemberId === member.id;
               
               let currentRole = 'Ghost';
               if (member.email) {
@@ -376,19 +397,47 @@ export default function GroupSettings() {
 
               return (
                 <div key={member.id} className="flex flex-col gap-2 p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-100 dark:border-slate-800 transition-colors">
-                  <div className="flex justify-between items-center w-full">
-                    <div>
-                      <p className="font-bold text-slate-700 dark:text-slate-300 transition-colors flex items-center gap-2">
-                        {member.name} 
-                        {member.email && <span className="bg-accent-100 text-accent-700 text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider">Linked</span>}
-                      </p>
-                      {member.email && <p className="text-[10px] text-slate-400">{member.email}</p>}
-                    </div>
-                    <button onClick={() => handleRemoveMember(member.id, member.name)} className={`p-2 rounded-lg transition-all ${isEngaged ? 'text-slate-300 bg-slate-100 dark:bg-slate-800/50 cursor-not-allowed' : 'text-red-400 hover:text-red-500 hover:bg-red-50 active:scale-90'}`}><Trash2 className="w-5 h-5" /></button>
-                  </div>
                   
-                  {/* 🚨 FIX: Re-added ShieldAlert warning box that was missing! */}
-                  {group.isCollaborative && member.email && (
+                  {/* 🚨 RESTORED: INLINE EDIT STATE */}
+                  {isEditingThis ? (
+                    <div className="flex items-center gap-2 w-full">
+                      <input 
+                        type="text" autoFocus
+                        value={editingMemberName} 
+                        onChange={(e) => setEditingMemberName(e.target.value)} 
+                        className="flex-1 min-w-0 p-2 bg-white dark:bg-slate-900 border border-brand-500 rounded-lg focus:outline-none text-slate-800 dark:text-slate-100 text-sm font-bold shadow-sm" 
+                      />
+                      <button onClick={() => handleRenameMemberSave(member.id)} className="p-2 bg-accent-500 text-white rounded-lg active:scale-95"><Check className="w-4 h-4" /></button>
+                      <button onClick={() => setEditingMemberId(null)} className="p-2 bg-slate-200 dark:bg-slate-800 text-slate-500 rounded-lg active:scale-95"><X className="w-4 h-4" /></button>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between items-center w-full">
+                      <div>
+                        <p className="font-bold text-slate-700 dark:text-slate-300 transition-colors flex items-center gap-2">
+                          {member.name} 
+                          {member.email && <span className="bg-accent-100 text-accent-700 text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider">Linked</span>}
+                        </p>
+                        {member.email && <p className="text-[10px] text-slate-400">{member.email}</p>}
+                      </div>
+                      
+                      <div className="flex items-center gap-1">
+                        <button 
+                          onClick={() => { setEditingMemberId(member.id); setEditingMemberName(member.name); }} 
+                          className="p-2 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-900/20 active:scale-90 transition-all"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button 
+                          onClick={() => handleRemoveMember(member.id, member.name)} 
+                          className={`p-2 rounded-lg transition-all ${isEngaged ? 'text-slate-300 bg-slate-100 dark:bg-slate-800/50 cursor-not-allowed' : 'text-red-400 hover:text-red-500 hover:bg-red-50 active:scale-90'}`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {group.isCollaborative && member.email && !isEditingThis && (
                     <div className="flex items-center gap-2 mt-1 border-t border-slate-200 dark:border-slate-800 pt-2">
                       <ShieldCheck className="w-3 h-3 text-slate-400" />
                       <select 
@@ -406,7 +455,6 @@ export default function GroupSettings() {
               );
             })}
             
-            {/* 🚨 RESTORED WARNING */}
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-4 flex items-start gap-1 transition-colors">
               <ShieldAlert className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" /> Members involved in expenses cannot be removed to protect calculation accuracy.
             </p>
