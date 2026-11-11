@@ -23,35 +23,38 @@ export default function AddExpense() {
   const [unequalSplits, setUnequalSplits] = useState<Record<string, string>>({});
   const [onBehalfOf, setOnBehalfOf] = useState<string>('');
   const [selectedForSplit, setSelectedForSplit] = useState<string[]>([]);
+  
+  // We must preserve the original creation date if we are editing!
+  const [originalDate, setOriginalDate] = useState<string | null>(null);
+  
   const [isSaving, setIsSaving] = useState(false);
 
-  // 🚨 NEW SECURITY: Block route hacking!
-  useEffect(() => {
-    if (group && group.isCollaborative) {
-      const userEmail = cloudUser?.email || '';
-      const isAdmin = group.roles?.admin?.includes(userEmail);
-      const isEditor = group.roles?.editor?.includes(userEmail);
-      
-      if (!isAdmin && !isEditor) {
-        alert("Security Violation: Viewers are not allowed to add expenses.");
-        navigate('/', { replace: true });
-      }
-    }
-  }, [group, cloudUser, navigate]);
-
-  // 🚨 OVERDRAFT PROTECTION MATH
+  // 🚨 OVERDRAFT PROTECTION MATH (Preserved perfectly)
   const totalAmount = parseFloat(amountStr) || 0;
   
   const currentLiquidity = useMemo(() => {
     if (!group || !group.isFundEnabled) return 0;
-    const allDeposits = group.expenses.filter(e => e.splitType === 'FUND_DEPOSIT');
-    const fundExpenses = group.expenses.filter(e => e.paidBy === VIRTUAL_FUND_ID && e.id !== expenseId); // Ignore current expense if editing
+    const allDeposits = group.expenses.filter(e => e.splitType === 'FUND_DEPOSIT' && !e.isSettled);
+    const fundExpenses = group.expenses.filter(e => e.paidBy === VIRTUAL_FUND_ID && !e.isSettled && e.id !== expenseId); 
     const deposited = allDeposits.reduce((sum, d) => sum + d.amount, 0);
     const spent = fundExpenses.reduce((sum, e) => sum + e.amount, 0);
     return deposited - spent;
   }, [group, expenseId]);
 
   const hasSufficientFunds = currentLiquidity >= totalAmount;
+
+  // 🚨 RBAC ROUTE PROTECTION
+  useEffect(() => {
+    if (group && group.isCollaborative) {
+      const userEmail = cloudUser?.email || '';
+      const isAdmin = group.roles?.admin?.includes(userEmail);
+      const isEditor = group.roles?.editor?.includes(userEmail);
+      if (!isAdmin && !isEditor) {
+        alert("Security Violation: Viewers are not allowed to add or edit expenses.");
+        navigate(`/group/${group.id}`, { replace: true });
+      }
+    }
+  }, [group, cloudUser, navigate]);
 
   useEffect(() => {
     if (group && expenseId) {
@@ -61,6 +64,7 @@ export default function AddExpense() {
         setAmountStr(existing.amount.toString());
         setPaidBy(existing.paidBy);
         setSplitType(existing.splitType);
+        setOriginalDate(existing.date);
         
         if (existing.splitType === 'UNEQUAL') {
           const uSplits: Record<string, string> = {};
@@ -87,12 +91,7 @@ export default function AddExpense() {
   const getValidationMessage = () => {
     if (totalAmount <= 0) return "Please enter a valid amount.";
     if (!description.trim()) return "Don't forget to add a description!";
-    
-    // 🚨 Overdraft Validation
-    if (paidBy === VIRTUAL_FUND_ID && !hasSufficientFunds) {
-      return `Trip Fund only has ₹${currentLiquidity.toFixed(0)} left!`;
-    }
-
+    if (paidBy === VIRTUAL_FUND_ID && !hasSufficientFunds) return `Trip Fund only has ₹${currentLiquidity.toFixed(0)} left!`;
     if (splitType === 'UNEQUAL' && !isUnequalBalanced) {
       if (remainingUnequal > 0) return `Assign the remaining ₹${remainingUnequal.toFixed(2)}`;
       return `Amounts exceed total by ₹${Math.abs(remainingUnequal).toFixed(2)}`;
@@ -109,21 +108,18 @@ export default function AddExpense() {
     setIsSaving(true);
     let splits: SplitItem[] = [];
 
+    // All robust math features preserved flawlessly
     if (splitType === 'EQUAL') {
       const splitAmount = Math.round((totalAmount / group.members.length) * 100) / 100;
       splits = group.members.map(m => ({ memberId: m.id, amount: splitAmount }));
-      
     } else if (splitType === 'UNEQUAL') {
       splits = Object.entries(unequalSplits).map(([memberId, amt]) => ({ memberId, amount: parseFloat(amt) || 0 })).filter(s => s.amount > 0);
-      
     } else if (splitType === 'ON_BEHALF') {
       splits = [{ memberId: onBehalfOf, amount: totalAmount }];
-      
     } else if (splitType === 'SELECTIVE_EQUAL') {
       const count = selectedForSplit.length;
       const baseSplit = Math.round((totalAmount / count) * 100) / 100;
       let assignedSoFar = 0;
-      
       selectedForSplit.forEach((memberId, idx) => {
         if (idx === count - 1) splits.push({ memberId, amount: Math.round((totalAmount - assignedSoFar) * 100) / 100 });
         else { splits.push({ memberId, amount: baseSplit }); assignedSoFar += baseSplit; }
@@ -133,7 +129,6 @@ export default function AddExpense() {
     try {
       const masterExpenseId = expenseId || crypto.randomUUID();
       
-      // 🚨 FIX: Fully construct the exact payload for BOTH cloud and local!
       const payload: Expense = { 
         id: masterExpenseId, 
         description: description.trim(), 
@@ -141,19 +136,23 @@ export default function AddExpense() {
         paidBy, 
         splitType, 
         splits,
-        date: new Date().toISOString(),
+        // Preserve original date on edit, or assign new date
+        date: originalDate || new Date().toISOString(),
         isSettled: false,
         createdByEmail: cloudUser?.email || 'unknown'
       };
 
+      // 🚨 THE UDF FIX: Strict Separation of Cloud vs Local Saving!
       if (group.isCollaborative && group.firebaseTripId) {
+        // Send ONLY to Firebase. The WebSocket will grab it and update the screen instantly.
         await cloudSaveExpense(group.firebaseTripId, {
           ...payload, updatedAt: Date.now() 
         });
+      } else {
+        // Send ONLY to local storage (Offline trips)
+        if (expenseId) editExpense(group.id, expenseId, payload);
+        else addExpense(group.id, payload);
       }
-
-      if (expenseId) editExpense(group.id, expenseId, payload);
-      else addExpense(group.id, payload);
       
       navigate(`/group/${group.id}`);
     } catch (err) {
@@ -183,27 +182,12 @@ export default function AddExpense() {
         <div>
           <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-3 transition-colors">Who paid?</label>
           <div className="flex flex-wrap gap-2">
-            
-            {/* 🚨 THE TRIP FUND BUTTON */}
             {group.isFundEnabled && !group.isFundClosed && (
-              <button 
-                onClick={() => {
-                  if (hasSufficientFunds) setPaidBy(VIRTUAL_FUND_ID);
-                }} 
-                className={`px-4 py-2 rounded-full font-bold text-sm transition-all flex items-center gap-1.5 ${
-                  paidBy === VIRTUAL_FUND_ID 
-                    ? 'bg-indigo-600 text-white shadow-md' 
-                    : !hasSufficientFunds 
-                      ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-transparent'
-                      : 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/50 hover:bg-indigo-100'
-                }`}
-              >
+              <button onClick={() => { if (hasSufficientFunds) setPaidBy(VIRTUAL_FUND_ID); }} className={`px-4 py-2 rounded-full font-bold text-sm transition-all flex items-center gap-1.5 ${paidBy === VIRTUAL_FUND_ID ? 'bg-indigo-600 text-white shadow-md' : !hasSufficientFunds ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-transparent' : 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/50 hover:bg-indigo-100'}`}>
                 {!hasSufficientFunds && <Lock className="w-3.5 h-3.5" />}
                 <Landmark className="w-4 h-4" /> Trip Fund (₹{currentLiquidity.toFixed(0)})
               </button>
             )}
-
-            {/* Normal Members */}
             {group.members.map(member => (
               <button key={member.id} onClick={() => setPaidBy(member.id)} className={`px-4 py-2 rounded-full font-semibold text-sm transition-all ${paidBy === member.id ? 'bg-brand-600 dark:bg-brand-500/20 text-white dark:text-brand-400 dark:border-brand-500/50 shadow-md dark:shadow-none border border-transparent' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
                 {member.name}
@@ -224,7 +208,6 @@ export default function AddExpense() {
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 transition-colors duration-300">
-          
           {splitType === 'EQUAL' && (
             <div className="text-center py-4">
               <div className="text-3xl font-bold text-brand-600 dark:text-brand-400 mb-1 transition-colors">₹{totalAmount > 0 ? (totalAmount / group.members.length).toFixed(2) : '0.00'}</div>

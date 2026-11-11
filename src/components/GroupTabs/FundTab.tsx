@@ -35,9 +35,10 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
     
     setIsSaving(true);
     
-    // 🚨 UNIFIED PAYLOAD CREATOR
+    const masterDepositId = crypto.randomUUID();
+    
     const payload: Expense = {
-      id: crypto.randomUUID(), // One Master ID
+      id: masterDepositId,
       description: `Fund Deposit by ${getMemberName(depositorId)}`,
       amount: amt,
       paidBy: depositorId,
@@ -49,22 +50,29 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
     };
 
     try {
+      // 🚨 STRICT UDF ENFORCEMENT: Proper if/else block
       if (group.isCollaborative && group.firebaseTripId) {
+        // Live Trip: Send ONLY to Cloud
         await cloudSaveExpense(group.firebaseTripId, {
           ...payload, updatedAt: Date.now()
         });
+      } else {
+        // Local Trip: Send ONLY to Local State
+        addExpense(group.id, payload);
       }
-      addExpense(group.id, payload);
+      
       setDepositAmount('');
       setShowDepositModal(false);
-    } catch (err) { alert("Failed to save deposit."); }
-    finally { setIsSaving(false); }
+    } catch (err) { 
+      alert("Failed to save deposit. Check connection."); 
+    } finally { 
+      setIsSaving(false); 
+    }
   };
 
   const handleDeleteDeposit = async (depositId: string, amount: number) => {
     if (!canModifyFund) { alert("You don't have permission to modify the fund."); return; }
     
-    // 🚨 OVERDRAFT DELETION GUARD
     if (currentLiquidity - amount < -0.01) {
       alert(`⚠️ Cannot delete this deposit!\n\nThe group has already spent this money. Deleting this would cause the Trip Fund to go negative by ₹${Math.abs(currentLiquidity - amount).toFixed(2)}.\n\nYou must delete some expenses first before removing this deposit.`);
       return;
@@ -75,15 +83,15 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
         try {
           await cloudDeleteExpense(group.firebaseTripId, depositId, cloudUser?.email || 'unknown');
         } catch (err) { alert("Cloud delete failed. Try again."); return; }
+      } else {
+        deleteExpense(group.id, depositId);
       }
-      deleteExpense(group.id, depositId);
     }
   };
 
   const handleDissolveFund = async () => {
     if (!isAdmin) { alert("Only Admins can dissolve the fund."); return; }
     
-    // 🚨 P2P SETTLEMENT GUARD
     const p2pDebts = calculatePendingP2PDebts();
     if (p2pDebts > 0) {
       alert(`⚠️ Cannot dissolve the fund yet!\n\nThere are pending out-of-pocket settlements between members. Please go to the SETTLE tab and record all out-of-pocket transactions first.`);
@@ -92,8 +100,11 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
     }
 
     if (window.confirm("Dissolve Trip Fund?\n\nThis will trigger the final settlement payouts, calculating exactly who gets the remaining ₹" + currentLiquidity.toFixed(0) + " cash back.")) {
-      toggleFundClosure(group.id, true);
-      if (group.isCollaborative && group.firebaseTripId) await cloudUpdateGroup(group.firebaseTripId, { isFundClosed: true });
+      if (group.isCollaborative && group.firebaseTripId) {
+        await cloudUpdateGroup(group.firebaseTripId, { isFundClosed: true });
+      } else {
+        toggleFundClosure(group.id, true);
+      }
       setActiveTab('SETTLE'); 
     }
   };
@@ -101,12 +112,14 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
   const handleReopenFund = async () => {
     if (!isAdmin) { alert("Only Admins can modify the fund."); return; }
     if (window.confirm("Reopen Trip Fund?\n\nThis will resume pooling and allow new deposits.")) {
-      toggleFundClosure(group.id, false);
-      if (group.isCollaborative && group.firebaseTripId) await cloudUpdateGroup(group.firebaseTripId, { isFundClosed: false });
+      if (group.isCollaborative && group.firebaseTripId) {
+        await cloudUpdateGroup(group.firebaseTripId, { isFundClosed: false });
+      } else {
+        toggleFundClosure(group.id, false);
+      }
     }
   };
 
-  // Helper to check for active P2P debts before allowing closure
   const calculatePendingP2PDebts = () => {
     const activeExps = group.expenses.filter(e => !e.isSettled);
     const balances: Record<string, number> = {};
@@ -121,7 +134,6 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
   return (
     <div className="space-y-6">
       
-      {/* THE DEPOSIT MODAL */}
       <AnimatePresence>
         {showDepositModal && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -152,7 +164,6 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
         )}
       </AnimatePresence>
 
-      {/* FUND DASHBOARD */}
       <div className="bg-gradient-to-br from-indigo-600 to-indigo-900 p-6 rounded-2xl shadow-lg text-white relative overflow-hidden">
         <Landmark className="absolute -right-4 -bottom-4 w-32 h-32 text-white/10" />
         <h3 className="text-sm font-bold text-indigo-100 flex items-center gap-2 mb-4"><Landmark className="w-4 h-4 text-indigo-300" /> Central Trip Fund</h3>
@@ -163,14 +174,8 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <div className="bg-black/20 p-3 rounded-xl backdrop-blur-sm">
-            <p className="text-[10px] text-indigo-200 uppercase font-bold tracking-wider mb-1">Total Collected</p>
-            <p className="text-lg font-bold">₹{totalDeposited.toFixed(0)}</p>
-          </div>
-          <div className="bg-black/20 p-3 rounded-xl backdrop-blur-sm">
-            <p className="text-[10px] text-indigo-200 uppercase font-bold tracking-wider mb-1">Total Spent</p>
-            <p className="text-lg font-bold">₹{totalSpentFromFund.toFixed(0)}</p>
-          </div>
+          <div className="bg-black/20 p-3 rounded-xl backdrop-blur-sm"><p className="text-[10px] text-indigo-200 uppercase font-bold tracking-wider mb-1">Total Collected</p><p className="text-lg font-bold">₹{totalDeposited.toFixed(0)}</p></div>
+          <div className="bg-black/20 p-3 rounded-xl backdrop-blur-sm"><p className="text-[10px] text-indigo-200 uppercase font-bold tracking-wider mb-1">Total Spent</p><p className="text-lg font-bold">₹{totalSpentFromFund.toFixed(0)}</p></div>
         </div>
       </div>
 
@@ -180,7 +185,6 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
         </button>
       )}
 
-      {/* LOG OF DEPOSITS */}
       {allDeposits.length > 0 && (
         <div className="space-y-3">
           <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider pl-1 mt-4 mb-2">Deposit Ledger</h3>
@@ -209,7 +213,6 @@ export default function FundTab({ group, setActiveTab }: { group: Group, setActi
         </div>
       )}
 
-      {/* DISSOLVE FUND DANGER ZONE */}
       {group.isFundClosed ? (
         <div className="bg-slate-100 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 text-center space-y-4">
           <div>

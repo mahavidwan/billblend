@@ -20,8 +20,7 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
   const activeExpensesAll = group.expenses.filter(e => !e.isSettled);
   
   // 🚨 THE PERFECT LEDGER MATH 
-  // We feed ONLY human members into the Min-Cash Flow algorithm!
-  // This calculates pure Out-Of-Pocket debts (e.g. Sagnik owes Debanjan for a taxi).
+  // We feed ONLY human members into the Min-Cash Flow algorithm to calculate pure P2P debts.
   const p2pSettlements = calculateSettlements(group.members, activeExpensesAll);
   const rawDebts = calculateRawDebts(group.members, activeExpensesAll);
   
@@ -33,7 +32,6 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
   const [expandedSettleIdx, setExpandedSettleIdx] = useState<number | null>(null);
   const [selectedSettlements, setSelectedSettlements] = useState<Set<number>>(new Set());
 
-  // Auto-select all out-of-pocket transfers by default
   useEffect(() => { 
     const indices = new Set<number>();
     p2pSettlements.forEach((_, i) => indices.add(i));
@@ -47,20 +45,21 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
     try {
       if (selectedSettlements.size === p2pSettlements.length && !group.isFundEnabled) {
         if (window.confirm("Record all settlements and move active expenses to history?")) {
+          // 🚨 TRUE UDF ENFORCEMENT: Cloud OR Local, never both!
           if (group.isCollaborative && group.firebaseTripId) {
             await cloudSettleAll(group.firebaseTripId, activeExpensesAll);
+          } else {
+            settleAllExpenses(group.id);
           }
-          settleAllExpenses(group.id);
           setActiveTab('EXPENSES');
         }
       } else {
         if (window.confirm(`Record ${selectedSettlements.size} selected settlement(s)?\n\nThis will balance their debts while keeping the remaining ones active.`)) {
           
-          // 🚨 FIX: Generate the unified Payload with explicit IDs in the UI!
           const repaymentsToInject: Expense[] = Array.from(selectedSettlements).map(idx => {
             const s = p2pSettlements[idx];
             return {
-              id: crypto.randomUUID(), // ONE unified ID
+              id: crypto.randomUUID(), // unified ID
               amount: s.amount, 
               paidBy: s.from, 
               splitType: 'ON_BEHALF' as const, 
@@ -74,13 +73,12 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
             };
           });
 
-          // 🚨 FIX: Push exact array to Cloud first!
+          // 🚨 TRUE UDF ENFORCEMENT
           if (group.isCollaborative && group.firebaseTripId) {
             await cloudBulkUpdateExpenses(group.firebaseTripId, repaymentsToInject);
+          } else {
+            recordRepayments(group.id, repaymentsToInject as any);
           }
-
-          // Push exact identical array to local store
-          recordRepayments(group.id, repaymentsToInject as any);
           setActiveTab('EXPENSES');
         }
       }
@@ -102,8 +100,7 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
     else setSelectedSettlements(new Set(p2pSettlements.map((_, i) => i)));
   };
 
-  // 🚨 CALCULATE FINAL FUND PAYOUTS (The Physical Cash Left)
-  // This calculates EXACTLY who gets the remaining cash in the bag when dissolved.
+  // 🚨 CALCULATE FINAL FUND PAYOUTS
   const allDeposits = activeExpensesAll.filter(e => e.splitType === 'FUND_DEPOSIT');
   const fundExpenses = activeExpensesAll.filter(e => e.paidBy === VIRTUAL_FUND_ID);
   const currentLiquidity = allDeposits.reduce((sum, d) => sum + d.amount, 0) - fundExpenses.reduce((sum, e) => sum + e.amount, 0);
@@ -125,15 +122,17 @@ export default function SettleTab({ group, setActiveTab }: { group: Group, setAc
     });
   }
 
-  // 🚨 THE MASTER ARCHIVE FUNCTION
+  // 🚨 MASTER ARCHIVE 
   const handleArchiveTrip = async () => {
     if(window.confirm("Archive all expenses completely?\n\nThis marks all P2P debts and Fund Payouts as fully resolved and clears your dashboard for the next leg of the trip.")) {
       setIsProcessing(true);
       try {
+        // 🚨 TRUE UDF ENFORCEMENT
         if (group.isCollaborative && group.firebaseTripId) {
           await cloudSettleAll(group.firebaseTripId, activeExpensesAll);
+        } else {
+          settleAllExpenses(group.id);
         }
-        settleAllExpenses(group.id);
         setActiveTab('EXPENSES');
       } catch (err) {
         alert("Failed to archive on cloud. Try again.");
