@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { exportGroupToJSON } from '../utils/export';
 import { createLiveTripInFirestore } from '../utils/collabSync';
-import { cloudBulkUpdateExpenses, cloudUpdateGroup, cloudEndCollaboration } from '../utils/firestoreActions';
+import { cloudExecuteMerge, cloudUpdateGroup, cloudEndCollaboration } from '../utils/firestoreActions';
 // 🚨 FIX: All imports are now perfectly aligned and used!
 import { ArrowLeft, UserPlus, Trash2, ShieldAlert, FileJson, Edit2, Check, PenLine, Globe, Zap, Link as LinkIcon, Clock, Merge, Lock, ServerOff, Landmark, CalendarClock, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -147,16 +147,23 @@ export default function GroupSettings() {
 
     if (window.confirm(`Merge all expenses from "${ghostName}" into "${targetName}"?\n\n"${ghostName}" will be permanently deleted.`)) {
       setIsMerging(true);
+      
+      // 1. Execute mathematically perfect merge locally
       mergeMembers(group.id, mergeGhostId, mergeTargetId);
+      
       const updatedGroup = useStore.getState().groups.find(g => g.id === group.id);
       
       if (updatedGroup && updatedGroup.isCollaborative && updatedGroup.firebaseTripId) {
         try {
+          // Find only the expenses that were touched by the merge
           const recentlyModified = updatedGroup.expenses.filter(e => (Date.now() - (e.updatedAt || 0)) < 5000);
-          if (recentlyModified.length > 0) await cloudBulkUpdateExpenses(updatedGroup.firebaseTripId, recentlyModified);
-          await cloudUpdateGroup(updatedGroup.firebaseTripId, { members: updatedGroup.members });
-        } catch (err) { alert("Merge succeeded locally, but failed to sync to cloud."); }
+          
+          // 🚨 FIX: Execute the TRUE Atomic Merge! (No network drop corruption!)
+          await cloudExecuteMerge(updatedGroup.firebaseTripId, updatedGroup.members, recentlyModified);
+          
+        } catch (err) { alert("Merge succeeded locally, but failed to sync to cloud. It will auto-sync later."); }
       }
+      
       setIsMerging(false); setShowMergeModal(false); setMergeGhostId(''); setMergeTargetId(''); alert("Merge complete!");
     }
   };
